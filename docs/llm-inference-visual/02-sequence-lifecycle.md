@@ -1,8 +1,8 @@
 # 第 2 课：Sequence 数据结构与请求生命周期
 
-## 1. 本章概述
+## 1. 本课概述
 
-**一句话版本**：一个推理请求在引擎内部长什么样——`Sequence` 是每个请求的"身份证"。
+**一句话概述**：一个推理请求在引擎内部长什么样 —— `Sequence` 是每个请求的"身份证"。
 
 nano-vllm 的核心数据结构 `Sequence` 承载了"一个推理请求"的全部状态：它保存 prompt 与生成 token，记录调度与 KV cache 相关的计数器与 `block_table`，其生命周期状态（WAITING/RUNNING/FINISHED）在调度器里不断变化。掌握 `Sequence` 后，后续课程里的调度与 KV cache 管理都有了落点。
 
@@ -17,7 +17,7 @@ nano-vllm 的核心数据结构 `Sequence` 承载了"一个推理请求"的全�
 
 ### 1.2 学习目标
 
-学完本课后，你应该能回答以下问题：
+学完本课后，我们应该能回答以下问题：
 
 - `Sequence` 保存了哪三类信息？（token_ids、调度计数器、KV cache 映射）
 - `num_cached_tokens`、`num_scheduled_tokens`、`num_tokens` 分别表示什么？它们在什么时候被更新？
@@ -77,7 +77,7 @@ stateDiagram-v2
 
 ### 2.3 KV cache 映射：block_table 与 block_size
 
-[`Sequence.block_table`](../../nanovllm/engine/sequence.py#L28) 是该请求持有的 block_id 列表；[`Sequence.block_size`](../../nanovllm/engine/sequence.py#L15) 是每个 block 的 token 容量。`num_blocks/last_block_num_tokens` 与 `block(i)` 帮你把 token 序列切成 block 视角；你可以把 block_table 理解成"这个请求的 KV cache 数据存在哪些内存块里"。
+[`Sequence.block_table`](../../nanovllm/engine/sequence.py#L28) 是该请求持有的 block_id 列表；[`Sequence.block_size`](../../nanovllm/engine/sequence.py#L15) 是每个 block 的 token 容量。`num_blocks/last_block_num_tokens` 与 `block(i)` 帮我们把 token 序列切成 block 视角；我们可以把 block_table 理解成"这个请求的 KV cache 数据存在哪些内存块里"。
 
 ```python
 # Sequence 把 token 序列切成 block 视角的三个入口：block 数、末块实际 token 数、按下标取 block。

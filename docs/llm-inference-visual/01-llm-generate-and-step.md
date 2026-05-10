@@ -4,7 +4,7 @@
 
 **一句话概述**：从用户调用 `generate("你好")` 开始，追踪代码到底做了什么，直到拿到生成的回答。
 
-nano-vllm 推理引擎的全局路径：对外接口 `LLM.generate` 进入系统后，把 prompt 变成 `Sequence`，调度器在每个 step 选择 prefill（一次性处理用户输入的阶段）或 decode（逐 token 生成回答的阶段），模型执行端返回 token，调度器推进状态直到请求完成。最终你将得到一张端到端流程图，以及能在代码里一键定位每个方框的锚点。
+nano-vllm 推理引擎的全局路径：对外接口 `LLM.generate` 进入系统后，把 prompt 变成 `Sequence`，调度器在每个 step 选择 prefill（一次性处理用户输入的阶段）或 decode（逐 token 生成回答的阶段），模型执行端返回 token，调度器推进状态直到请求完成。最终我们将得到一张端到端流程图，以及能在代码里一键定位每个方框的锚点。
 
 ### 1.1 课时安排
 
@@ -17,7 +17,7 @@ nano-vllm 推理引擎的全局路径：对外接口 `LLM.generate` 进入系统
 
 ### 1.2 学习目标
 
-学完本课后，你应该能回答以下问题：
+学完本课后，我们应该能回答以下问题：
 
 - `LLM` 和 `LLMEngine` 是什么关系？为什么用户调 `LLM.generate` 最终执行的是 `LLMEngine` 里的代码？
 - 每个 step 的"三段式"是什么？（调度 → 执行 → 回写）
@@ -27,11 +27,11 @@ nano-vllm 推理引擎的全局路径：对外接口 `LLM.generate` 进入系统
 
 ## 2. 原理说明：从文字到 token 再到生成
 
-理解推理引擎之前需要三个 LLM 基础直觉：模型是什么、输入怎么来、输出怎么一步步产生。如果你已经了解 Transformer 与自回归生成，可以直接跳到第 3 节。
+理解推理引擎之前需要三个 LLM 基础直觉：模型是什么、输入怎么来、输出怎么一步步产生。如果读者已经了解 Transformer 与自回归生成，可以直接跳到第 3 节。
 
-### 2.1 Transformer 是什么——一句话版本
+### 2.1 Transformer 是什么？
 
-你可以把 Transformer 模型想象成一个"黑箱函数"：**输入一串数字编号（token_ids），输出下一个数字编号的概率分布**。
+我们可以把 Transformer 模型想象成一个"黑箱函数"：**输入一串数字编号（token_ids），输出下一个数字编号的概率分布**。
 
 内部结构可以简化为三层：
 
@@ -39,7 +39,7 @@ nano-vllm 推理引擎的全局路径：对外接口 `LLM.generate` 进入系统
 2. **N 层 Transformer Block**：反复对所有向量做"互相看一看"（注意力）和"各自想一想"（前馈网络），逐步提炼语义
 3. **LM Head（输出头）**：把最后一个位置的向量变回词表大小的概率分布（logits → softmax → 概率）
 
-现阶段你只需记住这个输入/输出契约。第 5 课会打开"注意力"这个子模块，第 7 课会深入 KV cache 写入。
+现阶段我们只需记住这个输入/输出契约。第 5 课会打开"注意力"这个子模块，第 7 课会深入 KV cache 写入。
 
 ```mermaid
 flowchart LR
@@ -105,7 +105,7 @@ flowchart TD
 
 ### 3.1 LLM 是 LLMEngine 的别名入口
 
-`nanovllm.LLM` 并不新增行为，而是直接继承 [`LLMEngine`](../../nanovllm/llm.py)，因此后续所有推理逻辑都在引擎实现中。你可以把 `LLM` 理解成一个“方便用户调用的外壳”。
+`nanovllm.LLM` 并不新增行为，而是直接继承 [`LLMEngine`](../../nanovllm/llm.py)，因此后续所有推理逻辑都在引擎实现中。我们可以把 `LLM` 理解成一个“方便用户调用的外壳”。
 
 ### 3.2 generate：把 prompts 放入调度器并循环 step
 
@@ -222,7 +222,7 @@ def postprocess(self, seqs: list[Sequence], token_ids: list[int], is_prefill: bo
 import os
 from nanovllm import LLM, SamplingParams
 
-model_path = os.path.expanduser("~/huggingface/Qwen3-0.6B/")  # 替换为你的本地权重目录
+model_path = os.path.expanduser("~/huggingface/Qwen3-0.6B/")  # 替换为本地权重目录
 llm = LLM(model_path, enforce_eager=True, tensor_parallel_size=1)
 params = SamplingParams(temperature=0.1, max_tokens=16)
 
@@ -234,4 +234,4 @@ print("token_ids:", outputs[0]["token_ids"])
 ```
 
 - 验收要点（依据代码）：`generate` 返回的每个元素为 `{"text": tokenizer.decode(token_ids), "token_ids": token_ids}`，其中 `token_ids` 来自每个 seq 的 `completion_token_ids`（见 [llm_engine.py:L84-L90](../../nanovllm/engine/llm_engine.py#L84-L90) 与 [llm_engine.py:L54](../../nanovllm/engine/llm_engine.py#L54)）
-- 示例来源：[example.py](../../example.py) 与 [README.md:L34-L44](../../README.md#L34-L44)
+- 示例来源：[example.py](../../example.py) 与 [README.md §Quick Start](../../README.md#L35-L46)

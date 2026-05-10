@@ -1,8 +1,8 @@
 # 第 5 课：prefill 批构建与 context 注入
 
-## 1. 本章概述
+## 1. 本课概述
 
-**一句话版本**：prefill 阶段模型实际吃进去的张量长什么样——多个请求被展平拼接成一个大批次。
+**一句话概述**：prefill 阶段模型实际吃进去的张量长什么样——多个请求被展平拼接成一个大批次。
 
 从 `ModelRunner.prepare_prefill` 出发，理解 `input_ids/positions` 如何被展平拼接（flatten），`cu_seqlens_q/cu_seqlens_k` 与 `max_seqlen_q/max_seqlen_k` 如何为变长注意力提供边界信息，以及 `slot_mapping` 与 `block_tables` 为什么要作为上下文被注入到注意力层。
 
@@ -17,7 +17,7 @@
 
 ### 1.2 学习目标
 
-学完本课后，你应该能回答以下问题：
+学完本课后，我们应该能回答以下问题：
 
 - prefill 时 `input_ids` 为什么是 1D 展平张量（一维数组）而不是 2D padding（二维补零矩阵）？
 - `cu_seqlens_q` 与 `cu_seqlens_k` 分别代表什么？prefix cache 何时让两者不同？
@@ -27,7 +27,7 @@
 
 ## 2. 原理铺垫：Self-Attention 为什么需要看所有 token
 
-注意力机制的直觉与变长问题。如果你已经了解 Self-Attention 的 Q/K/V 概念，可以直接跳到第 3 节。
+注意力机制的直觉与变长问题。如果读者已经了解 Self-Attention 的 Q/K/V 概念，可以直接跳到第 3 节。
 
 ### 2.1 注意力机制的直觉
 
@@ -123,7 +123,7 @@ for i in range(start_block, end_block):
 
 ## 4. 练习
 
-用纯 Python 手算 `cu_seqlens_q` 与 `positions`，把"展平拼接"落到两个可打印的列表上。完成后，你应能解释 `cu_seqlens_q[i]` 与 `cu_seqlens_q[i+1]` 的语义，并说清 `positions` 为什么要以 `num_cached_tokens` 为起点。
+用纯 Python 手算 `cu_seqlens_q` 与 `positions`，把"展平拼接"落到两个可打印的列表上。完成后，我们应能解释 `cu_seqlens_q[i]` 与 `cu_seqlens_q[i+1]` 的语义，并说清 `positions` 为什么要以 `num_cached_tokens` 为起点。
 
 ```python
 # 练习：给定两条 seq 的 num_cached_tokens 与 num_scheduled_tokens，

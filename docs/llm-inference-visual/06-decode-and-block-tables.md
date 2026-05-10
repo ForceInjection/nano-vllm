@@ -1,8 +1,8 @@
 # 第 6 课：decode 一步生成与 block_tables
 
-## 1. 本章概述
+## 1. 本课概述
 
-**一句话版本**：decode 阶段每个 step 具体需要准备哪些张量——decode 比 prefill 简单得多，因为每个请求只送入 1 个 token。
+**一句话概述**：decode 阶段每个 step 具体需要准备哪些张量——decode 比 prefill 简单得多，因为每个请求只送入 1 个 token。
 
 decode 阶段每一步只生成 1 个新 token，因为历史 token 的 K/V 已经缓存好了（回忆第 1 课的自回归生成原理）。`ModelRunner.prepare_decode` 为每个 seq 构造最小输入：`input_ids`（last_token）、`positions`（当前位置）、`context_lens`（cache 长度）、`slot_mapping`（写入位置）与 `block_tables`（每个 seq 的 block_table padding 成矩阵）。
 
@@ -17,7 +17,7 @@ decode 阶段每一步只生成 1 个新 token，因为历史 token 的 K/V 已�
 
 ### 1.2 学习目标
 
-学完本课后，你应该能回答以下问题：
+学完本课后，我们应该能回答以下问题：
 
 - decode 批的输入为何是 1D 的 `input_ids`（长度为 bs），而不是类似 prefill 的展平拼接？
 - `context_lens` 与 `block_tables` 在注意力算子里分别扮演什么角色？

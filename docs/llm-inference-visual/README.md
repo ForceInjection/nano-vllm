@@ -6,7 +6,7 @@
 
 本课程只需要具备 Python 编程基础。Transformer 与注意力机制等 LLM 原理知识将在课中逐步引入，无需提前掌握。
 
-更多关于大模型相关内容请参考：[AI Fundermentals](https://github.com/ForceInjection/AI-fundermentals) | [GitHubPages](https://forceinjection.github.io/)。
+> 更多关于大模型相关内容请参考：[AI Fundermentals](https://github.com/ForceInjection/AI-fundermentals) | [GitHubPages](https://forceinjection.github.io/)。
 
 本课程目标是基于 nano-vllm 的真实代码路径，建立对 LLM 推理引擎的整体认识：从 `LLM.generate` 的入口出发，理解调度（prefill/decode）、KV cache 的 block 管理、注意力算子分支、Tensor Parallel 与 CUDA Graph 等关键机制，并在关键细节用示意图将程序逻辑、数据结构和张量（多维数组）的形状呈现出来。
 
@@ -58,7 +58,7 @@
 
 课程按推理链路从外到内展开：先打通端到端主干，再逐层拆开数据结构、调度、显存、批构建、注意力，最后把常见优化叠回地图上。每课均包含：本课概述（含课时安排与学习目标）、原理铺垫（如适用）、关键代码锚点与嵌入片段、示意图（Mermaid / draw.io）、最小练习与验收要点。
 
-### 2.1 第 1 课：从 `LLM.generate` 走到 step 循环
+### 第 1 课：从 `LLM.generate` 走到 step 循环
 
 [01-llm-generate-and-step.md](./01-llm-generate-and-step.md)
 
@@ -66,7 +66,7 @@
 
 本课把 `LLM → LLMEngine → Scheduler → ModelRunner` 串成一条线：prompt 先被包成 `Sequence`，调度器在每个 step 里选择做 prefill（一次性吞下 prompt）还是 decode（逐 token 续写），模型执行端返回 token，调度器推进状态直到请求完成。读完后我们会得到一张端到端流程图，以及在代码里一键定位每个方框的锚点，也顺势补齐 Transformer、Tokenizer、自回归生成这三条基础直觉。
 
-### 2.2 第 2 课：`Sequence` 数据结构与请求生命周期
+### 第 2 课：`Sequence` 数据结构与请求生命周期
 
 [02-sequence-lifecycle.md](./02-sequence-lifecycle.md)
 
@@ -74,7 +74,7 @@
 
 `Sequence` 同时承载三类信息：token 序列（prompt + 已生成 token）、调度计数器（`num_cached_tokens / num_scheduled_tokens / num_tokens`）、以及通往 KV cache 的 `block_table`。它的状态机在 WAITING / RUNNING / FINISHED 之间切换，恰好对应调度器里的行为分支。掌握这节课的字段语义后，后续调度与 KV cache 管理都有清晰的落点。
 
-### 2.3 第 3 课：Scheduler 的队列、chunked prefill 与 preempt
+### 第 3 课：Scheduler 的队列、chunked prefill 与 preempt
 
 [03-scheduler-queues-and-preempt.md](./03-scheduler-queues-and-preempt.md)
 
@@ -82,7 +82,7 @@
 
 本课沿着 `schedule()` 的代码路径，把 waiting / running 两个队列的流转讲清楚：prefill 阶段怎么拼 batch、`max_num_seqs` 与 `max_num_batched_tokens` 如何卡住批大小、decode 阶段 KV cache block 不足时怎样执行 preempt（把某个请求临时退回 waiting 以腾出资源）。最终产出一张调度流程图，每个分支条件都能对应回代码位置。
 
-### 2.4 第 4 课：BlockManager 与 prefix caching
+### 第 4 课：BlockManager 与 prefix caching
 
 [04-block-manager-and-prefix-cache.md](./04-block-manager-and-prefix-cache.md)
 
@@ -90,7 +90,7 @@
 
 注意力需要访问所有历史 token 的 K/V，KV cache 因而占满显存，必须精细管理。nano-vllm 把显存切成固定大小的 block，用 `free_block_ids / used_block_ids / hash_to_block_id` 三件套支撑 `can_allocate / allocate / deallocate / hash_blocks`。Prefix caching 则可以类比操作系统的共享只读页：相同前缀的 block 被多个请求共同引用、不重复分配，也不重复计算。
 
-### 2.5 第 5 课：prefill 批构建与 context 注入
+### 第 5 课：prefill 批构建与 context 注入
 
 [05-prefill-batching-and-context.md](./05-prefill-batching-and-context.md)
 
@@ -98,7 +98,7 @@
 
 本课从 `ModelRunner.prepare_prefill` 出发，讲清为什么 `input_ids` 是 1D 展平张量而不是二维 padding 矩阵，`cu_seqlens_q / cu_seqlens_k / max_seqlen_q / max_seqlen_k` 分别在变长注意力里担任什么边界角色，以及 `slot_mapping` 和 `block_tables` 为什么要以 context 的形式注入到注意力层。Self-Attention 为什么需要看所有 token，也会在原理铺垫里补齐直觉。
 
-### 2.6 第 6 课：decode 一步生成与 block_tables
+### 第 6 课：decode 一步生成与 block_tables
 
 [06-decode-and-block-tables.md](./06-decode-and-block-tables.md)
 
@@ -106,7 +106,7 @@
 
 因为历史 token 的 K/V 已经缓存好，decode 阶段每个 seq 只需送 1 个 token。`prepare_decode` 为每个 seq 构造一套最小输入：`input_ids`（last_token）、`positions`（当前位置）、`context_lens`（cache 长度）、`slot_mapping`（本步写入位置）与 `block_tables`（每个 seq 的 block_table 被 padding 成矩阵）。这节课把"decode 比 prefill 简单"这句直觉具体化到每一个字段上。
 
-### 2.7 第 7 课：Attention——KV 写入与算子分支
+### 第 7 课：Attention——KV 写入与算子分支
 
 [07-attention-kv-cache-and-branches.md](./07-attention-kv-cache-and-branches.md)
 
@@ -114,7 +114,7 @@
 
 核心是两件事：一是 `slot_mapping` 如何驱动 Triton kernel 把 K/V 写入 KV cache；二是 prefill 与 decode 为什么调用不同的注意力 API——`flash_attn_varlen_func` 负责变长批注意力，`flash_attn_with_kvcache` 负责增量生成。Prefix cache 命中时，K/V 会直接改用 `k_cache / v_cache` 作为输入，相当于从"共享只读页"里读数据。读完本课，"上下文对象"和"注意力算子调用"就在脑中连成一条线。
 
-### 2.8 第 8 课：常见优化的"位置感"（TP、CUDA Graph、torch.compile）
+### 第 8 课：常见优化的"位置感"（TP、CUDA Graph、torch.compile）
 
 [08-where-optimizations-live.md](./08-where-optimizations-live.md)
 

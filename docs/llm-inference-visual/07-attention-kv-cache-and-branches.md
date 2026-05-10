@@ -1,8 +1,8 @@
 # 第 7 课：Attention：KV 写入与算子分支
 
-## 1. 本章概述
+## 1. 本课概述
 
-**一句话版本**：把前两课注入的上下文字段真正落到注意力计算函数里——`slot_mapping` 如何驱动写入，prefill 和 decode 为什么调用不同的注意力 API。
+**一句话概述**：把前两课注入的上下文字段真正落到注意力计算函数里——`slot_mapping` 如何驱动写入，prefill 和 decode 为什么调用不同的注意力 API。
 
 `slot_mapping` 驱动 Triton kernel 把 K/V 写入 KV cache；prefill 阶段调用 `flash_attn_varlen_func`（变长批注意力），decode 阶段调用 `flash_attn_with_kvcache`（增量生成注意力）；prefix cache 场景下可以直接复用 `k_cache/v_cache` 作为注意力的 K/V 输入。理解这些分支后，"上下文对象"与"注意力算子调用"就在脑中连成一条线。
 
@@ -17,7 +17,7 @@
 
 ### 1.2 学习目标
 
-学完本课后，你应该能回答以下问题：
+学完本课后，我们应该能回答以下问题：
 
 - `store_kvcache` 在什么条件下触发？它写入的地址由什么决定？
 - prefill 与 decode 在注意力算子调用上有什么差异？为什么不能用同一个 API？
@@ -103,7 +103,7 @@ def store_kvcache_kernel(key_ptr, key_stride, value_ptr, value_stride,
 
 ### 3.3 prefill：flash_attn_varlen_func（含 prefix cache 分支）
 
-当 `context.is_prefill` 为 `True` 时，[注意力层调用 `flash_attn_varlen_func`](../../nanovllm/layers/attention.py#L64-L70)，并将 `cu_seqlens_q/cu_seqlens_k/max_seqlen_q/max_seqlen_k` 传入以支持变长 batch。若 `context.block_tables is not None`，代码会将 `k, v` 替换为 `k_cache, v_cache`，表示 K/V 直接来自 cache（prefix cache 场景：类似浏览器缓存，相同的前缀不需要重复计算）。
+当 `context.is_prefill` 为 `True` 时，[注意力层调用 `flash_attn_varlen_func`](../../nanovllm/layers/attention.py#L64-L70)，并将 `cu_seqlens_q/cu_seqlens_k/max_seqlen_q/max_seqlen_k` 传入以支持变长 batch。若 `context.block_tables is not None`，代码会将 `k, v` 替换为 `k_cache, v_cache`，表示 K/V 直接来自 cache（prefix cache 场景：类似操作系统的共享只读页，已计算的前缀 KV cache block 被多个请求的页表共同引用，无需重复计算和分配）。
 
 ```python
 # Attention.forward 的 prefill 分支：prefix cache 命中时 (k, v) 直接读自 cache，否则用本轮新计算的 (k, v)。

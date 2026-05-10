@@ -1,10 +1,10 @@
 # 第 3 课：Scheduler 的队列、chunked prefill 与 preempt
 
-## 1. 本章概述
+## 1. 本课概述
 
-**一句话介绍**：每个 step 里谁来决定跑哪些请求、跑多少 token——答案是调度器（Scheduler），它的角色类似 OS 进程调度器。
+**一句话概述**：每个 step 里谁来决定跑哪些请求、跑多少 token？答案是调度器（Scheduler），它的角色类似 OS 进程调度器。
 
-nano-vllm 的调度器在"吞吐量优先（即尽可能多地同时处理请求）"的约束下做批处理：prefill 阶段从 waiting 队列拼 batch（把多个请求合并处理以提高效率），decode 阶段从 running 队列逐步生成，KV cache block 不足时 preempt（抢占：暂时释放某个请求的资源，让其他请求能继续运行）。最终你将得到一张调度流程图，每个分支条件都能对应到代码。
+nano-vllm 的调度器在"吞吐量优先（即尽可能多地同时处理请求）"的约束下做批处理：prefill 阶段从 waiting 队列拼 batch（把多个请求合并处理以提高效率），decode 阶段从 running 队列逐步生成，KV cache block 不足时 preempt（抢占：暂时释放某个请求的资源，让其他请求能继续运行）。最终我们将得到一张调度流程图，每个分支条件都能对应到代码。
 
 ### 1.1 课时安排
 
@@ -17,7 +17,7 @@ nano-vllm 的调度器在"吞吐量优先（即尽可能多地同时处理请求
 
 ### 1.2 学习目标
 
-学完本课后，你应该能回答以下问题：
+学完本课后，我们应该能回答以下问题：
 
 - waiting 和 running 两个队列分别存放什么状态的请求？它们如何流转？
 - `max_num_seqs` 和 `max_num_batched_tokens` 这两个配置是怎么限制 prefill batch 大小的？

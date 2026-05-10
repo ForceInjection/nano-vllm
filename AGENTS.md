@@ -95,6 +95,10 @@ This subsection defines documentation conventions agents should follow when addi
 
 This subsection defines conventions that apply specifically to the tutorial under [docs/llm-inference-visual/](./docs/llm-inference-visual/). Keep reader-facing READMEs lean and record the authoring rules here.
 
+- Audience and language: lessons are written in Chinese for CS undergraduates whose only prerequisite is Python. LLM-specific concepts (Transformer, attention, KV cache) must be introduced where they are first needed rather than assumed.
+- Narrative voice: use first-person plural (我们) for shared derivations, outcomes, and interpretive framings; use third-person (读者) for prior-knowledge conditionals and ToC signposting (for example “如果读者已经了解…可以跳到…”). Avoid second-person 你/您 outside literal example strings such as tokenization inputs (`"你好"`).
+- Lesson structure: each `Lxx-*.md` follows a canonical four-section layout — §1 本课概述 (with 1.1 课时安排 and 1.2 学习目标), §2 原理铺垫 / 原理说明, §3 代码走读, §4 练习. Keep section numbering consistent so cross-lesson references remain stable.
+- OS analogies: when a mechanism mirrors an operating-systems concept (paging, reference counting, shared read-only pages, spawn + shared-memory IPC), name the analogy explicitly so the target audience can anchor on prior coursework. Keep the analogy a one-line aside, not a substitute for the code walkthrough.
 - Diagram assets live under `docs/llm-inference-visual/diagrams/`. Every diagram keeps both the draw.io source (`Lxx-*.drawio`) and the exported preview (`Lxx-*.png`); the `Lxx` prefix must match the lesson number.
 - Diagram labels should mirror code field names (for example `waiting/running/block_table/slot_mapping/block_tables`), and each diagram should carry a corner note with the source file basename so readers can jump back to the implementation.
 - Code references use three tiers, chosen per context:
@@ -128,7 +132,7 @@ This subsection defines the minimal expected artifacts for a bug fix.
 - Add a reproduction script or minimal failing snippet.
 - Apply a targeted fix and avoid unrelated formatting changes.
 - Re-run the reproduction to confirm the fix.
-- If the bug affects generation, validate using the public `LLM.generate` API. Source: [README.md](./README.md#L34-L44) and [nanovllm/llm.py](./nanovllm/llm.py).
+- If the bug affects generation, validate using the public `LLM.generate` API. Source: [README.md §Quick Start](./README.md#L35-L46) and [nanovllm/llm.py](./nanovllm/llm.py).
 
 ### 5.3 Performance Change Workflow
 

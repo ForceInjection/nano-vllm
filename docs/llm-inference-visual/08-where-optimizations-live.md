@@ -1,10 +1,10 @@
 # 第 8 课：常见优化的"位置感"（TP、CUDA Graph、torch.compile）
 
-## 1. 本章概述
+## 1. 本课概述
 
-**一句话版本**：本课不再逐行推导实现，而是建立一张"优化地图"——告诉你三种常见优化（TP、CUDA Graph、torch.compile）分别"住在"代码的哪里。
+**一句话概述**：本课不再逐行推导实现，而是建立一张"优化地图"——告诉我们三种常见优化（TP、CUDA Graph、torch.compile）分别"住在"代码的哪里。
 
-LLM 推理的性能瓶颈可以分为两大类：**计算瓶颈**（GPU 算力不够）和**内存瓶颈**（显存带宽不够）。本课建立一张"优化地图"：Tensor Parallel（多进程 + NCCL，即 NVIDIA 的 GPU 间通信库）在哪里启用、数据如何广播；CUDA Graph 在什么条件下录制（capture）与重放（replay）；以及 `torch.compile` 在采样模块中如何出现。目标是让你在需要进一步性能排查时，能快速定位入口与触发条件，并知道这些优化分别影响"吞吐、延迟、显存"中的哪些维度。
+LLM 推理的性能瓶颈可以分为两大类：**计算瓶颈**（GPU 算力不够）和**内存瓶颈**（显存带宽不够）。本课建立一张"优化地图"：Tensor Parallel（多进程 + NCCL，即 NVIDIA 的 GPU 间通信库）在哪里启用、数据如何广播；CUDA Graph 在什么条件下录制（capture）与重放（replay）；以及 `torch.compile` 在采样模块中如何出现。目标是让我们在需要进一步性能排查时，能快速定位入口与触发条件，并知道这些优化分别影响"吞吐、延迟、显存"中的哪些维度。
 
 ### 1.1 课时安排
 
@@ -17,7 +17,7 @@ LLM 推理的性能瓶颈可以分为两大类：**计算瓶颈**（GPU 算力�
 
 ### 1.2 学习目标
 
-学完本课后，你应该能回答以下问题：
+学完本课后，我们应该能回答以下问题：
 
 - Tensor Parallel 的进程模型在代码中的入口在哪？rank0 和子进程之间如何通信？
 - CUDA Graph replay 的触发条件是什么？为什么它只覆盖 decode 的一部分场景？
@@ -33,7 +33,7 @@ LLM 推理的性能瓶颈可以分为两大类：**计算瓶颈**（GPU 算力�
 - **CUDA Graph**：把一次 decode 前向传播"录像"再重放，消掉 CPU 侧 kernel launch 的累积延迟——decode 因为算子小、步数多，对 launch 开销最敏感。
 - **torch.compile**：把 Python 层的 op 融合为更少的 kernel，减少解释器开销；nano-vllm 只在采样模块用它，因为采样的计算图最稳定。
 
-这三种优化不互斥，它们住在代码的不同位置。接下来的地图告诉你每个开关在哪个文件。
+这三种优化不互斥，它们住在代码的不同位置。接下来的地图告诉我们每个开关在哪个文件。
 
 ---
 
@@ -45,7 +45,7 @@ LLM 推理的性能瓶颈可以分为两大类：**计算瓶颈**（GPU 算力�
 
 ### 3.1 Tensor Parallel：多进程与共享内存广播
 
-TP 的最小机制：rank0 创建子进程与同步事件，rank>0 进入 loop 等待共享内存里的"方法名 + 参数"，然后在各自的 GPU 上执行相同的方法以完成张量并行计算。类比：一个老师（rank0）同时给多个学生（子进程）布置相同的作业。
+TP 的最小机制：rank0 通过 spawn 创建子进程，并以共享内存作为 IPC（进程间通信）通道广播方法调用。这与操作系统的 fork/spawn + 共享内存多进程模型同构：主进程（rank0）将任务描述写入共享内存段，子进程通过 Event 信号量唤醒后读取，并在各自的 GPU 上执行相同的方法以完成张量并行计算。
 
 - **进程创建与事件**：[`LLMEngine.__init__`](../../nanovllm/engine/llm_engine.py#L22-L34) 使用 `spawn` 启动 `tensor_parallel_size - 1` 个子进程，并为每个子进程创建一个 Event（事件信号）。rank0 仍在主进程内创建一个 `ModelRunner`。
 - **共享内存与方法调用广播**：[`ModelRunner.__init__`](../../nanovllm/engine/model_runner.py#L41-L48) 中当 `world_size > 1` 且 `rank == 0` 时创建共享内存；`rank > 0` 通过 [`loop()`](../../nanovllm/engine/model_runner.py#L61-L66) 阻塞等待 Event 被 set，然后从共享内存反序列化出 `method_name, args` 并执行同名方法。rank0 通过 [`write_shm` 与 `call`](../../nanovllm/engine/model_runner.py#L76-L89) 广播调用。
@@ -80,7 +80,7 @@ def run_model(self, input_ids, positions, is_prefill):
 
 ### 3.3 torch.compile：采样模块的编译位置
 
-[`torch.compile`](../../nanovllm/layers/sampler.py#L5-L12) 在 nano-vllm 中只出现在采样模块——采样的计算图相对稳定（softmax + 随机采样 + argmax），适合通过编译减少 Python 开销与融合算子，就像把经常走的路铺成高速公路。
+[`torch.compile`](../../nanovllm/layers/sampler.py#L5-L12) 在 nano-vllm 中只出现在采样模块——采样的计算图相对稳定（softmax + 随机采样 + argmax），适合通过编译减少 Python 开销与融合算子。这本质上是 JIT 编译（Just-In-Time Compilation）：把反复执行的解释型热路径编译为优化后的机器码，消除 Python 解释器逐行调度的开销。
 
 ```python
 # Sampler.forward：@torch.compile 修饰一次前向；Gumbel-Max 技巧（exponential + argmax）等价于按概率采样。

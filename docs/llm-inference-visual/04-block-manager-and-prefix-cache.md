@@ -1,10 +1,10 @@
 # 第 4 课：BlockManager 与 prefix caching
 
-## 1. 本章概述
+## 1. 本课概述
 
-**一句话版本**：KV cache 的显存是怎么管理的——BlockManager 就像操作系统课里的内存分页管理器，把显存切成固定大小的 block 来分配和回收。
+**一句话概述**：KV cache 的显存是怎么管理的——BlockManager 就像操作系统课里的内存分页管理器，把显存切成固定大小的 block 来分配和回收。
 
-注意力需要访问所有历史 token 的 K/V 向量，KV cache 因此占用大量 GPU 显存，需要精细管理。nano-vllm 把 KV cache 管理抽象为一个 block 池：空闲池 `free_block_ids`、占用集合 `used_block_ids`、以及用哈希表 `hash_to_block_id` 支撑的 prefix caching（类似浏览器缓存：相同的前缀不需要重复计算）。理解 `can_allocate/allocate/deallocate/hash_blocks` 的分工后，你就能解释调度器为什么在 `postprocess()` 中调用 `hash_blocks()`。
+注意力需要访问所有历史 token 的 K/V 向量，KV cache 因此占用大量 GPU 显存，需要精细管理。nano-vllm 把 KV cache 管理抽象为一个 block 池：空闲池 `free_block_ids`、占用集合 `used_block_ids`、以及用哈希表 `hash_to_block_id` 支撑的 prefix caching（类似操作系统的共享只读页：相同前缀的 KV cache block 被多个请求复用，无需重复计算和分配）。理解 `can_allocate/allocate/deallocate/hash_blocks` 的分工后，我们就能解释调度器为什么在 `postprocess()` 中调用 `hash_blocks()`。
 
 ### 1.1 课时安排
 
@@ -17,7 +17,7 @@
 
 ### 1.2 学习目标
 
-学完本课后，你应该能回答以下问题：
+学完本课后，我们应该能回答以下问题：
 
 - `Sequence.block_table` 在"逻辑序列"与"物理 KV cache"之间起什么桥接作用？
 - prefix caching 的命中条件是什么？它如何减少新分配的 block 数量？

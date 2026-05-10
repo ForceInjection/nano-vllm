@@ -12,9 +12,9 @@ A lightweight vLLM implementation built from scratch.
 
 ## Key Features
 
-* 🚀 **Fast offline inference** - Comparable inference speeds to vLLM
-* 📖 **Readable codebase** - Clean implementation in ~ 1,200 lines of Python code
-* ⚡ **Optimization Suite** - Prefix caching, Tensor Parallelism, Torch compilation, CUDA graph, etc.
+- 🚀 **Fast offline inference** - Comparable inference speeds to vLLM
+- 📖 **Readable codebase** - Clean implementation in ~ 1,200 lines of Python code
+- ⚡ **Optimization Suite** - Prefix caching, Tensor Parallelism, Torch compilation, CUDA graph, etc.
 
 ## Installation
 
@@ -25,6 +25,7 @@ pip install git+https://github.com/GeeeekExplorer/nano-vllm.git
 ## Model Download
 
 To download the model weights manually, use the following command:
+
 ```bash
 huggingface-cli download --resume-download Qwen/Qwen3-0.6B \
   --local-dir ~/huggingface/Qwen3-0.6B/ \
@@ -34,6 +35,7 @@ huggingface-cli download --resume-download Qwen/Qwen3-0.6B \
 ## Quick Start
 
 See `example.py` for usage. The API mirrors vLLM's interface with minor differences in the `LLM.generate` method:
+
 ```python
 from nanovllm import LLM, SamplingParams
 llm = LLM("/YOUR/MODEL/PATH", enforce_eager=True, tensor_parallel_size=1)
@@ -48,6 +50,7 @@ outputs[0]["text"]
 See `bench.py` for benchmark.
 
 **Test Configuration:**
+
 - Hardware: RTX 4070 Laptop (8GB)
 - Model: Qwen3-0.6B
 - Total Requests: 256 sequences
@@ -57,9 +60,8 @@ See `bench.py` for benchmark.
 **Performance Results:**
 | Inference Engine | Output Tokens | Time (s) | Throughput (tokens/s) |
 |----------------|-------------|----------|-----------------------|
-| vLLM           | 133,966     | 98.37    | 1361.84               |
-| Nano-vLLM      | 133,966     | 93.41    | 1434.13               |
-
+| vLLM | 133,966 | 98.37 | 1361.84 |
+| Nano-vLLM | 133,966 | 93.41 | 1434.13 |
 
 ## Star History
 

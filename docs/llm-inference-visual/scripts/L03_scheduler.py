@@ -257,12 +257,110 @@ def verify_preempt_state_machine():
     """)
 
 
+# ── 验证 6: 真实 Scheduler 对比 ──────────────────────────────────────
+
+def verify_with_real_scheduler(model_path):
+    """用真实 Scheduler 跑一次，输出和模拟结果对比。"""
+    from nanovllm.config import Config
+    from nanovllm.engine.scheduler import Scheduler
+    from nanovllm.engine.sequence import Sequence
+    from nanovllm.sampling_params import SamplingParams
+
+    print("\n┌─────────────────────────────────────────────────────────────┐")
+    print("│  6. 真实 Scheduler 对比验证                                  │")
+    print("│     直接调用 scheduler.add() → schedule() → postprocess()   │")
+    print("└─────────────────────────────────────────────────────────────┘")
+
+    # 构造 Config（用真实模型路径，但手动设 num_kvcache_blocks）
+    config = Config(model_path, max_num_batched_tokens=1000, max_num_seqs=8,
+                    kvcache_block_size=256)
+    config.num_kvcache_blocks = 100  # 足够多，避免 preempt 干扰
+    Sequence.block_size = config.kvcache_block_size
+
+    scheduler = Scheduler(config)
+    print(f"\n  >>> config.max_num_batched_tokens = {config.max_num_batched_tokens}")
+    print(f"  >>> config.max_num_seqs = {config.max_num_seqs}")
+    print(f"  >>> config.kvcache_block_size = {config.kvcache_block_size}")
+    print(f"  >>> config.num_kvcache_blocks = {config.num_kvcache_blocks}")
+
+    # ── 场景: 3 条 seq，max_batch=1000 ──
+    print(f"\n  ▸ 场景: 3 条 seq (200, 300, 400 tokens), max_batch=1000")
+    sp = SamplingParams(temperature=0.6, max_tokens=64)
+
+    # 构造 prompt token_ids
+    import copy
+    seqs = [
+        Sequence(list(range(200)), sp),
+        Sequence(list(range(300)), sp),
+        Sequence(list(range(400)), sp),
+    ]
+
+    print(f"    创建 Sequence:")
+    for i, s in enumerate(seqs):
+        print(f"      seq[{i}]: num_tokens={s.num_tokens}, status={s.status.name}")
+
+    # add 到 scheduler
+    for s in seqs:
+        scheduler.add(s)
+    print(f"    waiting 队列长度: {len(scheduler.waiting)}, running: {len(scheduler.running)}")
+
+    # 调用真实的 schedule()
+    scheduled_seqs, is_prefill = scheduler.schedule()
+    num_tokens = sum(seq.num_scheduled_tokens for seq in scheduled_seqs) if is_prefill else -len(scheduled_seqs)
+
+    print(f"\n  >>> scheduled_seqs, is_prefill = scheduler.schedule()")
+    print(f"      is_prefill = {is_prefill}")
+    print(f"      调度了 {len(scheduled_seqs)} 条 seq:")
+    for i, s in enumerate(scheduled_seqs):
+        print(f"        seq[{i}]: num_tokens={s.num_tokens}, "
+              f"num_scheduled_tokens={s.num_scheduled_tokens}, "
+              f"num_cached_tokens={s.num_cached_tokens}, "
+              f"status={s.status.name}")
+
+    # 对比模拟
+    print(f"\n  ▸ 模拟 vs 真实对比:")
+    from nanovllm.engine.scheduler import __name__ as _
+    sim_result, _ = simulate_prefill([200, 300, 400], max_num_batched_tokens=1000)
+    print(f"    模拟预期: scheduled={sim_result}")
+    real_result = [(i, s.num_scheduled_tokens) for i, s in enumerate(scheduled_seqs)]
+    print(f"    真实调度: scheduled={real_result}")
+
+    assert len(scheduled_seqs) == 3, f"应调度 3 条, 实际 {len(scheduled_seqs)}"
+    assert real_result == sim_result, f"模拟 {sim_result} ≠ 真实 {real_result}"
+    print(f"    [PASS] 真实 Scheduler 输出和模拟一致")
+
+    # ── 跑 postprocess + 下一轮 decode ──
+    print(f"\n  ▸ 模拟一轮 postprocess + decode:")
+    # 假 token_ids（随机）
+    token_ids = [100 + i for i in range(len(scheduled_seqs))]
+    scheduler.postprocess(scheduled_seqs, token_ids, is_prefill)
+
+    print(f"    postprocess 后:")
+    print(f"      waiting: {len(scheduler.waiting)}, running: {len(scheduler.running)}")
+    for i, s in enumerate(seqs):
+        print(f"      seq[{i}]: status={s.status.name}, num_tokens={s.num_tokens}")
+
+    # 下一轮 decode
+    scheduled_seqs2, is_prefill2 = scheduler.schedule()
+    print(f"\n    下一轮 schedule(): is_prefill={is_prefill2}, seqs={len(scheduled_seqs2)}")
+    for i, s in enumerate(scheduled_seqs2):
+        print(f"      seq: num_scheduled_tokens={s.num_scheduled_tokens} (应为 1, decode)")
+        assert s.num_scheduled_tokens == 1
+    print(f"    [PASS] decode 每 seq 处理 1 token")
+
+
 def main():
+    import sys
+    model_path = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser(
+        "~/autodl-tmp/Qwen3-0.6B/"
+    )
+
     verify_basic_batching()
     verify_chunked_prefill_constraint()
     verify_prefix_cache_batching()
     verify_decode_and_preempt()
     verify_preempt_state_machine()
+    verify_with_real_scheduler(model_path)
 
     print("\n" + "=" * 64)
     print("L03 全部断言通过 ✓")

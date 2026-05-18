@@ -192,10 +192,132 @@ def verify_prefix_cache_trigger():
     print("    更长 → 有 prefix cache 数据 → 需要用 block_tables 查表定位")
 
 
+# ── 验证 4: 真实 Context 类 + store_kvcache 张量模拟 ─────────────────
+
+def verify_with_real_context(model_path):
+    """用真实的 Context 类和张量模拟 store_kvcache 的完整生命周期。"""
+    import torch
+    from nanovllm.config import Config
+    from nanovllm.engine.sequence import Sequence
+    from nanovllm.sampling_params import SamplingParams
+    from nanovllm.utils.context import Context, set_context, get_context, reset_context
+
+    print("\n┌─────────────────────────────────────────────────────────────┐")
+    print("│  4. 真实 Context 类 + store_kvcache 张量模拟                 │")
+    print("│     对齐 context.py, attention.py:L59-L75                  │")
+    print("└─────────────────────────────────────────────────────────────┘")
+
+    # 需要加载 config 来初始化 hf_config
+    Config(model_path, kvcache_block_size=256)
+    Sequence.block_size = 256
+
+    # ── Context 完整生命周期 ──
+    print(f"\n  ▸ Context 注入 → 读取 → 清空（真实 nanovllm 代码路径）:")
+
+    show_code_block("Context dataclass & set/get/reset", "nanovllm/utils/context.py",
+                     show_source("nanovllm/utils/context.py", 1, 28))
+
+    # prefill context
+    bs = 2
+    cu_q = torch.tensor([0, 3, 7], dtype=torch.int32)
+    cu_k = torch.tensor([0, 3, 7], dtype=torch.int32)
+    slot_map = torch.randint(0, 1000, (7,), dtype=torch.int32)
+
+    set_context(True, cu_seqlens_q=cu_q, cu_seqlens_k=cu_k,
+                max_seqlen_q=4, max_seqlen_k=4,
+                slot_mapping=slot_map, context_lens=None, block_tables=None)
+    ctx = get_context()
+    print(f"    >>> set_context(is_prefill=True, ...)")
+    print(f"    >>> ctx = get_context()")
+    print(f"        ctx.is_prefill   = {ctx.is_prefill}")
+    print(f"        ctx.cu_seqlens_q = {ctx.cu_seqlens_q.tolist()}")
+    print(f"        ctx.cu_seqlens_k = {ctx.cu_seqlens_k.tolist()}")
+    print(f"        ctx.max_seqlen_q = {ctx.max_seqlen_q}")
+    print(f"        ctx.max_seqlen_k = {ctx.max_seqlen_k}")
+    print(f"        ctx.slot_mapping[:4] = {ctx.slot_mapping[:4].tolist()}")
+    print(f"        ctx.context_lens    = {ctx.context_lens}")
+    print(f"        ctx.block_tables    = {ctx.block_tables}")
+
+    # decode context
+    context_lens = torch.tensor([10, 15], dtype=torch.int32)
+    bt = torch.tensor([[0, 1, -1], [2, -1, -1]], dtype=torch.int32)
+    slot_map_d = torch.tensor([150, 220], dtype=torch.int32)
+
+    set_context(False, slot_mapping=slot_map_d, context_lens=context_lens,
+                block_tables=bt)
+    ctx = get_context()
+    print(f"\n    >>> set_context(is_prefill=False, ...)")
+    print(f"    >>> ctx = get_context()")
+    print(f"        ctx.is_prefill   = {ctx.is_prefill}")
+    print(f"        ctx.cu_seqlens_q = {ctx.cu_seqlens_q}  ← decode 不需要")
+    print(f"        ctx.slot_mapping = {ctx.slot_mapping.tolist()}")
+    print(f"        ctx.context_lens = {ctx.context_lens.tolist()}")
+    print(f"        ctx.block_tables = {ctx.block_tables.tolist()}")
+
+    # reset
+    reset_context()
+    ctx = get_context()
+    print(f"\n    >>> reset_context()")
+    print(f"    >>> ctx = get_context()")
+    print(f"        ctx.is_prefill = {ctx.is_prefill}")
+    print(f"        ctx.cu_seqlens_q = {ctx.cu_seqlens_q}")
+    print(f"        ctx.slot_mapping = {ctx.slot_mapping}")
+    assert ctx.is_prefill is False and ctx.slot_mapping is None
+    print(f"    [PASS] Context 生命周期: set → get → reset")
+
+    # ── store_kvcache 张量模拟 ──
+    print(f"\n  ▸ store_kvcache 张量写入模拟:")
+    # 模拟 KV cache: [num_blocks, block_size, num_kv_heads, head_dim]
+    num_blocks = 4
+    block_size = 256
+    num_kv_heads = 8
+    head_dim = 128
+
+    # k_cache 形状: (num_blocks, block_size, num_kv_heads, head_dim)
+    k_cache = torch.zeros(num_blocks, block_size, num_kv_heads, head_dim)
+    v_cache = torch.zeros(num_blocks, block_size, num_kv_heads, head_dim)
+    print(f"    KV cache 形状: ({num_blocks}, {block_size}, {num_kv_heads}, {head_dim})")
+    print(f"    k_cache.shape  = {tuple(k_cache.shape)}")
+    print(f"    k_cache.dtype  = {k_cache.dtype}")
+    print(f"    k_cache 占用:  {k_cache.element_size() * k_cache.numel() / 1024 / 1024:.1f} MB × 2 = "
+          f"{2 * k_cache.element_size() * k_cache.numel() / 1024 / 1024:.1f} MB")
+
+    # 模拟 store_kvcache: 用 slot_mapping 写入
+    # token 0 → slot 10, token 1 → slot 256 (block 1 pos 0), token 2 → slot 511 (block 1 pos 255)
+    k_new = torch.randn(3, num_kv_heads, head_dim)
+    v_new = torch.randn(3, num_kv_heads, head_dim)
+    slots = torch.tensor([10, 256 + 0, 256 + 255], dtype=torch.int32)  # 3 tokens
+
+    # 展开写入: k_cache[slot // block_size, slot % block_size] = k_new[idx]
+    block_ids = slots // block_size  # [0, 1, 1]
+    positions = slots % block_size    # [10, 0, 255]
+    for idx in range(3):
+        k_cache[block_ids[idx], positions[idx]] = k_new[idx]
+        v_cache[block_ids[idx], positions[idx]] = v_new[idx]
+
+    print(f"\n    写入 3 个 token 到 KV cache:")
+    for idx in range(3):
+        bid = block_ids[idx].item()
+        pos = positions[idx].item()
+        print(f"      token[{idx}] → slot={slots[idx].item()} → block[{bid}][{pos}] "
+              f"k={k_new[idx, 0, :3].tolist()}")
+    assert not k_cache[block_ids[0], positions[0]].eq(0).all()
+    assert k_cache[0, 0].eq(0).all()  # 未写入位置仍为 0
+    print(f"    [PASS] slot_mapping → block/position → KV cache 写入")
+    print(f"    这正是 attention.py:L11-L30 Triton kernel 做的事：")
+    print(f"      for each token: slot = slot_mapping[idx]; write(key, k_cache[slot * D])")
+
+
 def main():
+    import sys
+    model_path = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser(
+        "~/autodl-tmp/Qwen3-0.6B/"
+    )
+
     verify_slot_mapping_sentinel()
     verify_attention_branches()
     verify_prefix_cache_trigger()
+    verify_with_real_context(model_path)
 
     print("\n" + "=" * 64)
     print("L07 全部断言通过 ✓")

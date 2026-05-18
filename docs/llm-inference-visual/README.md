@@ -167,9 +167,9 @@ bash run_all.sh L03 L05
 
 另含两个辅助脚本：
 
-| 脚本 | 说明 |
-|------|------|
+| 脚本                                               | 说明                                                                                                |
+| -------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
 | [verify_nanovllm.py](./scripts/verify_nanovllm.py) | nano-vllm 功能验证（6 个用例：Quick Start、多请求、token_ids、SamplingParams、Chat Template、吞吐） |
-| [benchmark.py](./scripts/benchmark.py) | 性能基准测试（`--num-seqs`、`--max-input`、`--max-output`、`--no-cuda-graph`、`--tp`） |
+| [benchmark.py](./scripts/benchmark.py)             | 性能基准测试（`--num-seqs`、`--max-input`、`--max-output`、`--no-cuda-graph`、`--tp`）              |
 
 模型路径通过命令行参数或 `NANOVLLM_MODEL_PATH` 环境变量指定，详见 [scripts/README.md](./scripts/README.md)。

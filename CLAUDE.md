@@ -5,19 +5,39 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## Commands
 
 ```bash
-# Install in editable mode
-python -m pip install -e .
+# Install (editable) — flash-attn may need a pre-built wheel from GitHub releases
+pip install -e .
 
-# Run example (requires Qwen3-0.6B weights at ~/huggingface/Qwen3-0.6B/)
+# Run example (requires Qwen3-0.6B weights)
 python example.py
 
-# Run benchmark
+# Run benchmark (256 seqs, 1024/1024 tokens, CUDA Graph on)
 python bench.py
 
-# Download model weights (one-time)
-huggingface-cli download --resume-download Qwen/Qwen3-0.6B \
-  --local-dir ~/huggingface/Qwen3-0.6B/ \
-  --local-dir-use-symlinks False
+# Download model weights (one-time, via modelscope mirror in China)
+pip install modelscope
+python -c "from modelscope import snapshot_download; snapshot_download('qwen/Qwen3-0.6B', cache_dir='./Qwen3-0.6B/')"
+```
+
+**Course exercise scripts** under `docs/llm-inference-visual/scripts/`:
+
+```bash
+cd docs/llm-inference-visual/scripts/
+
+# All (GPU needed for L01)
+bash run_all.sh --all
+
+# CPU-only (L02-L08)
+bash run_all.sh
+
+# Single lesson — model path via argv or NANOVLLM_MODEL_PATH env var
+python L03_scheduler.py /path/to/model
+
+# Functional verification (6 test cases)
+python verify_nanovllm.py /path/to/model
+
+# Standalone benchmark with argparse
+python benchmark.py /path/to/model --num-seqs 64 --max-input 512 --max-output 256
 ```
 
 No test suite, linter, or type-checker is configured in this repo.
@@ -59,4 +79,6 @@ No test suite, linter, or type-checker is configured in this repo.
 - KV-cache block size must be a multiple of 256 (`kvcache_block_size % 256 == 0`)
 - Greedy sampling (temperature ≤ 1e-10) is explicitly rejected — minimum is slightly above zero
 - Only Qwen3-0.6B model architecture is implemented
+- `flash-attn` may fail to `pip install` from source (CPU/memory heavy). Download the pre-built wheel from GitHub releases matching the torch+CUDA version (e.g. `flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl`). Use `ghproxy.net` if GitHub is unreachable.
+- Course exercise scripts (`docs/llm-inference-visual/scripts/`) are self-contained but share a common `show_source()`/`show_code_block()` helper for displaying nano-vllm source snippets inline. Scripts that need the model accept `sys.argv[1]` or the `NANOVLLM_MODEL_PATH` env var.
 - `AGENTS.md` provides further guidance on agent roles, workflows, and documentation conventions for the visual course under `docs/llm-inference-visual/`

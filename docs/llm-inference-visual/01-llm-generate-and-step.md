@@ -235,3 +235,9 @@ print("token_ids:", outputs[0]["token_ids"])
 
 - 验收要点（依据代码）：`generate` 返回的每个元素为 `{"text": tokenizer.decode(token_ids), "token_ids": token_ids}`，其中 `token_ids` 来自每个 seq 的 `completion_token_ids`（见 [llm_engine.py:L84-L90](../../nanovllm/engine/llm_engine.py#L84-L90) 与 [llm_engine.py:L54](../../nanovllm/engine/llm_engine.py#L54)）
 - 示例来源：[example.py](../../example.py) 与 [README.md §Quick Start](../../README.md#L35-L46)
+
+### 4.1 自测题
+
+1. `LLM` 继承 `LLMEngine` 但不新增任何方法，这种设计的目的是什么？如果不解耦直接暴露 `LLMEngine` 会有什么问题？
+2. 如果 `step()` 返回的 `num_tokens` 始终为 0，代码中哪些地方会受到影响？
+3. `generate` 的 while 循环为什么用 `scheduler.is_finished()` 而非 `while True` + break？这两种写法在什么边界条件下会有不同行为？

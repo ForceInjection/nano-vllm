@@ -183,10 +183,125 @@ def verify_slot_mapping():
     print("  [PASS]")
 
 
+# ── 验证 4: 真实 torch 张量构造 ──────────────────────────────────────
+
+def verify_with_real_tensors(model_path):
+    """用真实 torch 张量模拟 prepare_prefill 的输出，展示 shape/dtype。"""
+    import torch
+    from nanovllm.config import Config
+    from nanovllm.engine.sequence import Sequence
+    from nanovllm.sampling_params import SamplingParams
+    from nanovllm.utils.context import set_context, get_context, reset_context
+
+    print("\n┌─────────────────────────────────────────────────────────────┐")
+    print("│  4. 真实 torch 张量构造（对齐 prepare_prefill）               │")
+    print("│     展示 shape / dtype / 前 N 项值                           │")
+    print("└─────────────────────────────────────────────────────────────┘")
+
+    Config(model_path, kvcache_block_size=256)  # 加载 hf_config 但不需要完整 Config
+    Sequence.block_size = 256
+    sp = SamplingParams(temperature=0.6, max_tokens=64)
+
+    # 两条 seq
+    seq_a = Sequence([100, 200, 300], sp)     # 3 tokens
+    seq_b = Sequence([400, 500, 600, 700], sp)  # 4 tokens
+    seq_a.num_scheduled_tokens = 3
+    seq_b.num_scheduled_tokens = 4
+
+    # 模拟 block_table（通常由 BlockManager.allocate 设置）
+    seq_a.block_table = [0]
+    seq_b.block_table = [1]
+
+    seqs = [seq_a, seq_b]
+    block_size = 256
+
+    # ── 构造 input_ids & positions ──
+    print(f"\n  ▸ input_ids & positions:")
+    input_ids_list = []
+    positions_list = []
+    cu_seqlens_q = [0]
+    cu_seqlens_k = [0]
+
+    for seq in seqs:
+        start = seq.num_cached_tokens
+        end = start + seq.num_scheduled_tokens
+        input_ids_list.extend(seq[start:end])
+        positions_list.extend(range(start, end))
+        cu_seqlens_q.append(cu_seqlens_q[-1] + seq.num_scheduled_tokens)
+        cu_seqlens_k.append(cu_seqlens_k[-1] + seq.num_cached_tokens + seq.num_scheduled_tokens)
+
+    input_ids = torch.tensor(input_ids_list, dtype=torch.int64)
+    positions = torch.tensor(positions_list, dtype=torch.int64)
+    cu_q = torch.tensor(cu_seqlens_q, dtype=torch.int32)
+    cu_k = torch.tensor(cu_seqlens_k, dtype=torch.int32)
+    print(f"    input_ids:    shape={tuple(input_ids.shape)}, dtype={input_ids.dtype}, "
+          f"values={input_ids.tolist()}")
+    print(f"    positions:    shape={tuple(positions.shape)}, dtype={positions.dtype}, "
+          f"values={positions.tolist()}")
+    print(f"    cu_seqlens_q: shape={tuple(cu_q.shape)}, dtype={cu_q.dtype}, "
+          f"values={cu_q.tolist()}")
+    print(f"    cu_seqlens_k: shape={tuple(cu_k.shape)}, dtype={cu_k.dtype}, "
+          f"values={cu_k.tolist()}")
+
+    assert input_ids.shape == (7,)
+    assert positions.shape == (7,)
+    assert cu_q.shape == (3,)  # 1 + bs
+    print("    [OK] shapes 正确")
+
+    # ── 构造 slot_mapping ──
+    print(f"\n  ▸ slot_mapping:")
+    slot_mapping = []
+    for seq in seqs:
+        start = seq.num_cached_tokens
+        end = start + seq.num_scheduled_tokens
+        start_block = start // block_size
+        end_block = (end + block_size - 1) // block_size
+        for i in range(start_block, end_block):
+            slot_start = seq.block_table[i] * block_size
+            if i == start_block:
+                slot_start += start % block_size
+            if i != end_block - 1:
+                slot_end = seq.block_table[i] * block_size + block_size
+            else:
+                slot_end = seq.block_table[i] * block_size + end - i * block_size
+            slot_mapping.extend(range(slot_start, slot_end))
+
+    slot_map = torch.tensor(slot_mapping, dtype=torch.int32)
+    print(f"    slot_mapping:  shape={tuple(slot_map.shape)}, dtype={slot_map.dtype}")
+    print(f"    values: {slot_map.tolist()}")
+    assert slot_map.shape == (7,)
+    print("    [OK]")
+
+    # ── 演示 context 注入 ──
+    print(f"\n  ▸ Context 注入（set_context → get_context → reset_context）:")
+    set_context(True, cu_q, cu_k, max_seqlen_q=4, max_seqlen_k=4,
+                slot_mapping=slot_map, context_lens=None, block_tables=None)
+    ctx = get_context()
+    print(f"    is_prefill       = {ctx.is_prefill}")
+    print(f"    cu_seqlens_q     = {ctx.cu_seqlens_q.tolist()}")
+    print(f"    cu_seqlens_k     = {ctx.cu_seqlens_k.tolist()}")
+    print(f"    max_seqlen_q     = {ctx.max_seqlen_q}")
+    print(f"    max_seqlen_k     = {ctx.max_seqlen_k}")
+    print(f"    slot_mapping[:4] = {ctx.slot_mapping[:4].tolist()}")
+    print(f"    block_tables     = {ctx.block_tables}")
+    assert ctx.is_prefill is True
+    reset_context()
+    ctx2 = get_context()
+    print(f"    reset 后 is_prefill = {ctx2.is_prefill} (应回默认)")
+    assert ctx2.is_prefill is False
+    print("    [PASS] Context 注入 → 读取 → 清空 生命周期完整")
+
+
 def main():
+    import sys
+    model_path = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser(
+        "~/autodl-tmp/Qwen3-0.6B/"
+    )
+
     verify_cu_seqlens()
     verify_cu_seqlens_k()
     verify_slot_mapping()
+    verify_with_real_tensors(model_path)
 
     print("\n" + "=" * 64)
     print("L05 全部断言通过 ✓")

@@ -169,11 +169,116 @@ def verify_block_tables_padding():
     print(f"  [PASS] -1 哨兵标记无效 block 位置")
 
 
+# ── 验证 5: 真实 torch 张量（decode）─────────────────────────────────
+
+def verify_with_real_tensors(model_path):
+    """用真实 torch 张量模拟 prepare_decode 的输出，展示 shape/dtype。"""
+    import torch
+    from nanovllm.config import Config
+    from nanovllm.engine.sequence import Sequence
+    from nanovllm.sampling_params import SamplingParams
+    from nanovllm.utils.context import set_context, get_context, reset_context
+
+    print("\n┌─────────────────────────────────────────────────────────────┐")
+    print("│  5. 真实 torch 张量构造（对齐 prepare_decode）                 │")
+    print("│     展示 shape / dtype / 与 prefill 的差异                    │")
+    print("└─────────────────────────────────────────────────────────────┘")
+
+    Config(model_path, kvcache_block_size=256)
+    Sequence.block_size = 256
+    sp = SamplingParams(temperature=0.6, max_tokens=64)
+    block_size = 256
+
+    # 三条 decode 阶段的 seq
+    seq_a = Sequence([100, 200, 300] + [1000], sp)  # 3 prompt + 1 completion
+    seq_b = Sequence([400, 500] + [2000, 2001, 2002], sp)  # 2 prompt + 3 completion
+    seq_a.block_table = [0]
+    seq_b.block_table = [1]
+
+    seqs = [seq_a, seq_b]
+
+    # ── 构造 decode 张量 ──
+    print(f"\n  ▸ input_ids & positions & context_lens:")
+    input_ids_list = []
+    positions_list = []
+    context_lens_list = []
+    slot_mapping_list = []
+
+    for seq in seqs:
+        input_ids_list.append(seq.last_token)
+        positions_list.append(len(seq) - 1)
+        context_lens_list.append(len(seq))
+        slot_mapping_list.append(
+            seq.block_table[-1] * block_size + seq.last_block_num_tokens - 1
+        )
+
+    input_ids = torch.tensor(input_ids_list, dtype=torch.int64)
+    positions = torch.tensor(positions_list, dtype=torch.int64)
+    context_lens = torch.tensor(context_lens_list, dtype=torch.int32)
+    slot_mapping = torch.tensor(slot_mapping_list, dtype=torch.int32)
+
+    print(f"    input_ids:    shape={tuple(input_ids.shape)}, dtype={input_ids.dtype}, "
+          f"values={input_ids.tolist()}")
+    print(f"    positions:    shape={tuple(positions.shape)}, dtype={positions.dtype}, "
+          f"values={positions.tolist()}")
+    print(f"    context_lens: shape={tuple(context_lens.shape)}, dtype={context_lens.dtype}, "
+          f"values={context_lens.tolist()}")
+    print(f"    slot_mapping: shape={tuple(slot_mapping.shape)}, dtype={slot_mapping.dtype}, "
+          f"values={slot_mapping.tolist()}")
+
+    assert input_ids.shape == (2,) and positions.shape == (2,)
+    print("    [OK] shapes: (bs,) — 每个 seq 1 个 token, 不像 prefill 那样展平")
+
+    # ── block_tables padding ──
+    print(f"\n  ▸ block_tables padding:")
+    max_blocks = max(len(s.block_table) for s in seqs)
+    bt_list = [s.block_table + [-1] * (max_blocks - len(s.block_table)) for s in seqs]
+    block_tables = torch.tensor(bt_list, dtype=torch.int32)
+    print(f"    block_tables: shape={tuple(block_tables.shape)}, dtype={block_tables.dtype}")
+    print(f"    values: {block_tables.tolist()}")
+    assert block_tables.shape == (2, 1)
+    print("    [OK] max_blocks=1, padding 不需要 -1 哨兵 (所有 seq 等长)")
+
+    # ── context 注入 ──
+    print(f"\n  ▸ Context 注入 (decode):")
+    set_context(False, slot_mapping=slot_mapping, context_lens=context_lens,
+                block_tables=block_tables)
+    ctx = get_context()
+    print(f"    is_prefill     = {ctx.is_prefill}")
+    print(f"    slot_mapping   = {ctx.slot_mapping.tolist()}")
+    print(f"    context_lens   = {ctx.context_lens.tolist()}")
+    print(f"    block_tables   = {ctx.block_tables.tolist()}")
+    assert ctx.is_prefill is False
+    assert ctx.cu_seqlens_q is None  # decode 不需要 cu_seqlens
+    reset_context()
+    print(f"    [PASS] decode context: cu_seqlens=None, context_lens/block_tables 已注入")
+
+    # ── prefill vs decode 对比 ──
+    print(f"\n  ▸ prefill vs decode 张量对比:")
+    print(f"    ┌──────────────┬─────────────────────┬──────────────────────┐")
+    print(f"    │ 字段           │ prefill              │ decode               │")
+    print(f"    ├──────────────┼─────────────────────┼──────────────────────┤")
+    print(f"    │ input_ids     │ 1D (total_tokens,)  │ 1D (bs,)             │")
+    print(f"    │ positions     │ 1D (total_tokens,)  │ 1D (bs,)             │")
+    print(f"    │ cu_seqlens_q  │ 1D (bs+1,)          │ None                 │")
+    print(f"    │ cu_seqlens_k  │ 1D (bs+1,)          │ None                 │")
+    print(f"    │ slot_mapping  │ 1D (total_tokens,)  │ 1D (bs,)             │")
+    print(f"    │ context_lens  │ None                │ 1D (bs,)             │")
+    print(f"    │ block_tables  │ 2D (可选, prefix)    │ 2D (bs, max_blocks)  │")
+    print(f"    └──────────────┴─────────────────────┴──────────────────────┘")
+
+
 def main():
+    import sys
+    model_path = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser(
+        "~/autodl-tmp/Qwen3-0.6B/"
+    )
+
     verify_slot_formula()
     verify_may_append()
     verify_can_append()
     verify_block_tables_padding()
+    verify_with_real_tensors(model_path)
 
     print("\n" + "=" * 60)
     print("L06 验证完成：所有断言通过")

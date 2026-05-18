@@ -41,9 +41,12 @@ def show_code_block(title, file_path, lines):
 
 
 def main():
-    model_path = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser(
-        "~/autodl-tmp/Qwen3-0.6B/"
-    )
+    model_path = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("NANOVLLM_MODEL_PATH", "")
+    if not model_path:
+        print("用法: python L01_end_to_end.py <model_path>", file=sys.stderr)
+        print("或设置环境变量: export NANOVLLM_MODEL_PATH=/path/to/model", file=sys.stderr)
+        sys.exit(1)
+    model_path = os.path.expanduser(model_path)
 
     print("=" * 68)
     print("L01 验证：从 LLM.generate 走到 step 循环")

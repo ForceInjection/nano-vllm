@@ -306,9 +306,12 @@ def verify_with_real_context(model_path):
 
 def main():
     import sys
-    model_path = sys.argv[1] if len(sys.argv) > 1 else os.path.expanduser(
-        "~/autodl-tmp/Qwen3-0.6B/"
-    )
+    model_path = sys.argv[1] if len(sys.argv) > 1 else os.environ.get("NANOVLLM_MODEL_PATH", "")
+    if not model_path:
+        print("用法: python L07_attention.py <model_path>", file=sys.stderr)
+        print("或设置环境变量: export NANOVLLM_MODEL_PATH=/path/to/model", file=sys.stderr)
+        sys.exit(1)
+    model_path = os.path.expanduser(model_path)
 
     verify_slot_mapping_sentinel()
     verify_attention_branches()

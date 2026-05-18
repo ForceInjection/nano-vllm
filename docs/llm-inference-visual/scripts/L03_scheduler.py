@@ -288,7 +288,6 @@ def verify_with_real_scheduler(model_path):
     sp = SamplingParams(temperature=0.6, max_tokens=64)
 
     # 构造 prompt token_ids
-    import copy
     seqs = [
         Sequence(list(range(200)), sp),
         Sequence(list(range(300)), sp),
@@ -319,7 +318,6 @@ def verify_with_real_scheduler(model_path):
 
     # 对比模拟
     print(f"\n  ▸ 模拟 vs 真实对比:")
-    from nanovllm.engine.scheduler import __name__ as _
     sim_result, _ = simulate_prefill([200, 300, 400], max_num_batched_tokens=1000)
     print(f"    模拟预期: scheduled={sim_result}")
     real_result = [(i, s.num_scheduled_tokens) for i, s in enumerate(scheduled_seqs)]

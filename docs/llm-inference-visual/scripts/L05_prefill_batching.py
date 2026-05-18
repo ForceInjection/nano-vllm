@@ -8,8 +8,8 @@ L05 练习：prefill 批构建与 context 注入
 - prefix cache 命中时 cu_seqlens_k 可能大于 cu_seqlens_q
 - slot_mapping 将逻辑 token 映射到物理 KV cache 的 slot
 
-依赖：无（纯 Python 模拟）
-用法：python L05_prefill_batching.py
+依赖：torch + 模型路径（Section 4 需要；Section 1-3 纯 Python）
+用法：python L05_prefill_batching.py [model_path]
 """
 
 import os

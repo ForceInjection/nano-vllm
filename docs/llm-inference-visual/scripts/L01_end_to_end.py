@@ -14,7 +14,6 @@ L01 练习：从 LLM.generate 走到 step 循环
 
 import os
 import sys
-import inspect
 
 import torch
 from nanovllm import LLM, SamplingParams
@@ -123,12 +122,10 @@ def main():
     print("│     llm_engine.py:L60-L90                                  │")
     print("└─────────────────────────────────────────────────────────────┘\n")
 
-    show_code_block("generate", "nanovllm/engine/llm_engine.py",
+    show_code_block("generate (入队)", "nanovllm/engine/llm_engine.py",
                      show_source("nanovllm/engine/llm_engine.py", 60, 70))
-    show_source("nanovllm/engine/llm_engine.py", 84, 91)
-    for l in show_source("nanovllm/engine/llm_engine.py", 84, 91):
-        print(f"  {l}")
-    print()
+    show_code_block("generate (出队 & 返回)", "nanovllm/engine/llm_engine.py",
+                     show_source("nanovllm/engine/llm_engine.py", 84, 91))
 
     # 跑一次真实推理
     params = SamplingParams(temperature=0.6, max_tokens=32)

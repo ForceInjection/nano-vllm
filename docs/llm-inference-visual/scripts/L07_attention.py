@@ -8,8 +8,8 @@ L07 练习：Attention — KV 写入与算子分支
 - decode 分支：flash_attn_with_kvcache（增量生成注意力）
 - prefix cache 命中时 K/V 直接使用 k_cache/v_cache
 
-依赖：无（纯 Python 模拟）
-用法：python L07_attention.py
+依赖：torch + 模型路径（仅 Section 4 需要；Section 1-3 纯 Python）
+用法：python L07_attention.py [model_path]
 """
 
 import os
@@ -198,8 +198,6 @@ def verify_with_real_context(model_path):
     """用真实的 Context 类和张量模拟 store_kvcache 的完整生命周期。"""
     import torch
     from nanovllm.config import Config
-    from nanovllm.engine.sequence import Sequence
-    from nanovllm.sampling_params import SamplingParams
     from nanovllm.utils.context import Context, set_context, get_context, reset_context
 
     print("\n┌─────────────────────────────────────────────────────────────┐")
@@ -207,9 +205,8 @@ def verify_with_real_context(model_path):
     print("│     对齐 context.py, attention.py:L59-L75                  │")
     print("└─────────────────────────────────────────────────────────────┘")
 
-    # 需要加载 config 来初始化 hf_config
+    # 加载 hf_config 验证模型路径有效
     Config(model_path, kvcache_block_size=256)
-    Sequence.block_size = 256
 
     # ── Context 完整生命周期 ──
     print(f"\n  ▸ Context 注入 → 读取 → 清空（真实 nanovllm 代码路径）:")
@@ -217,8 +214,7 @@ def verify_with_real_context(model_path):
     show_code_block("Context dataclass & set/get/reset", "nanovllm/utils/context.py",
                      show_source("nanovllm/utils/context.py", 1, 28))
 
-    # prefill context
-    bs = 2
+    # prefill context: 2 条 seq, 总 7 tokens
     cu_q = torch.tensor([0, 3, 7], dtype=torch.int32)
     cu_k = torch.tensor([0, 3, 7], dtype=torch.int32)
     slot_map = torch.randint(0, 1000, (7,), dtype=torch.int32)

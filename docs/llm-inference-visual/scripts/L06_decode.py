@@ -7,8 +7,8 @@ L06 练习：decode 一步生成与 block_tables
 - may_append 触发条件：len(seq) % block_size == 1
 - block_tables padding：不同长度补齐后用 -1 标记无效 block
 
-依赖：无（纯 Python 模拟）
-用法：python L06_decode.py
+依赖：torch + 模型路径（Section 5 需要；Section 1-4 纯 Python）
+用法：python L06_decode.py [model_path]
 """
 
 import os
@@ -189,9 +189,9 @@ def verify_with_real_tensors(model_path):
     sp = SamplingParams(temperature=0.6, max_tokens=64)
     block_size = 256
 
-    # 三条 decode 阶段的 seq
-    seq_a = Sequence([100, 200, 300] + [1000], sp)  # 3 prompt + 1 completion
-    seq_b = Sequence([400, 500] + [2000, 2001, 2002], sp)  # 2 prompt + 3 completion
+    # 两条 decode 阶段的 seq
+    seq_a = Sequence([100, 200, 300] + [1000], sp)             # 3 prompt + 1 completion
+    seq_b = Sequence([400, 500] + [2000, 2001, 2002], sp)       # 2 prompt + 3 completion
     seq_a.block_table = [0]
     seq_b.block_table = [1]
 

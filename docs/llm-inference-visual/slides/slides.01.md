@@ -37,23 +37,45 @@ layout: default
   本节课是第一课：沿着一次 <code>LLM.generate("你好")</code> 调用，追踪代码从入口到返回的完整路径
 </div>
 
+<!--
+nano-vllm 是一个从零构建的轻量级 vLLM 实现，约 1400 行 Python 代码，推理速度与 vLLM 相当。
+
+本课是第一课，建立对 LLM 推理引擎主链路的全局认知。学生学完应能画出从 generate 到 step 的完整流程图。
+-->
+
 ---
 layout: default
 ---
 
 # 本课在课程中的位置
 
-```mermaid {scale: 0.7}
-flowchart LR
-    L01["<strong>L01</strong><br/>generate → step"] --> L02["L02<br/>Sequence 生命周期"]
-    L02 --> L03["L03<br/>调度器与抢占"]
-    L03 --> L04["L04<br/>Block 管理与前缀缓存"]
-    L04 --> L05["L05<br/>Prefill Batching"]
-    L05 --> L06["L06<br/>Decode 与 Block Table"]
-    L06 --> L07["L07<br/>Attention 与 KV Cache"]
-    L07 --> L08["L08<br/>优化全景图"]
-    style L01 fill:#3b82f6,color:#fff,stroke:#2563eb,stroke-width:3px
-```
+<div class="mt-4 text-sm max-w-2xl mx-auto">
+
+<div class="flex justify-center gap-1 mb-2">
+  <div class="bg-blue-600 text-white rounded px-3 py-1.5 font-bold w-28 text-center">L01<br/><span class="text-xs font-normal opacity-80">generate→step</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L02<br/><span class="text-xs text-gray-400">Sequence</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L03<br/><span class="text-xs text-gray-400">调度器</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L04<br/><span class="text-xs text-gray-400">Block 管理</span></div>
+</div>
+
+<div class="flex justify-center mb-1">
+  <div class="text-gray-400 text-lg">↓</div>
+</div>
+
+<div class="flex justify-center gap-1">
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L05<br/><span class="text-xs text-gray-400">Prefill</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L06<br/><span class="text-xs text-gray-400">Decode</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L07<br/><span class="text-xs text-gray-400">Attention</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L08<br/><span class="text-xs text-gray-400">优化全景</span></div>
+</div>
+
+</div>
 
 <div v-click class="mt-4 grid grid-cols-2 gap-3 text-sm">
 <div class="bg-gray-800/50 p-3 rounded">
@@ -72,13 +94,13 @@ layout: default
 
 从用户调用 `generate("你好")` 开始，追踪代码到底做了什么，直到拿到生成的回答。
 
-| 阶段 | 时长 | 内容要点 |
-|------|------|----------|
-| 课程介绍 | 5 min | nano-vllm 项目概览、本课在课程中的位置 |
-| 原理铺垫 | 20 min | Transformer 架构总览、Tokenizer 原理、自回归生成动机 |
+| 阶段     | 时长   | 内容要点                                                             |
+| -------- | ------ | -------------------------------------------------------------------- |
+| 课程介绍 | 5 min  | nano-vllm 项目概览、本课在课程中的位置                               |
+| 原理铺垫 | 20 min | Transformer 架构总览、Tokenizer 原理、自回归生成动机                 |
 | 代码走读 | 40 min | `LLM` → `add_request` → `step` 三段式 → Prefill/Decode → postprocess |
-| 脚本演示 | 15 min | 运行 L01_end_to_end.py，5 个 section 逐一验证 |
-| 动手练习 | 10 min | 自测题 + 代码观察 |
+| 脚本演示 | 15 min | 运行 L01_end_to_end.py，5 个 section 逐一验证                        |
+| 动手练习 | 10 min | 自测题 + 代码观察                                                    |
 
 ---
 layout: default
@@ -117,6 +139,7 @@ layout: section
 ---
 
 # 2. 原理说明
+
 ## 从文字到 token 再到生成
 
 ---
@@ -130,7 +153,9 @@ layout: default
 > **输入**：一串数字编号（token_ids）
 > **输出**：下一个数字编号的概率分布
 
-```mermaid {scale: 0.75}
+<div class="mt-5"></div>
+
+```mermaid {scale: 0.55}
 flowchart LR
     A[文本] --> B[Tokenizer]
     B --> C["token_ids<br/>[108386, 99489]"]
@@ -164,8 +189,8 @@ layout: default
 
 <div class="mt-6">
 
-```mermaid {scale: 0.7}
-flowchart TD
+```mermaid {scale: 0.55}
+flowchart LR
     A["Prompt: '你好世界'<br/>3 个 token"] --> B["Embedding<br/>[3, 896] 矩阵"]
     B --> C["Block 1<br/>Attention + FFN<br/>[3, 896] → [3, 896]"]
     C --> D["Block 2 ... Block N<br/>每层形状不变<br/>[3, 896] → [3, 896]"]
@@ -242,7 +267,8 @@ Transformer 每次只预测**一个**下一个 token。生成整句话必须循�
 <div>
 
 **自回归循环**
-```mermaid {scale: 0.65}
+
+```mermaid {scale: 0.6}
 flowchart TD
     A["输入: ['你','好']"] --> B[模型前向]
     B --> C["预测: '世'"]
@@ -252,13 +278,16 @@ flowchart TD
 ```
 
 </div>
+
 <div>
 
-**类比**
+**类比：**
+
 - 📖 把试卷题目从头到尾读一遍 → **Prefill**
 - ✍️ 写答案时每个字都要参考前文 → **Decode**
 
 **为什么区分二者？**
+
 - Prefill: 计算量 `O(n²)`，但只做一次
 - Decode: 计算量 `O(n)` per step，但重复几百次
 - 不同计算模式需要不同的优化策略
@@ -273,18 +302,17 @@ flowchart TD
 ---
 layout: default
 ---
-
 # Prefill vs Decode：一张表看清两种模式
 
-| 维度 | Prefill | Decode |
-|------|---------|--------|
-| **触发时机** | waiting 队列非空 | waiting 为空 + running 非空 |
-| **输入内容** | prompt 的全部（或部分）token | 每条 seq 上次生成的 1 个 token |
-| **每 seq token 数** | `num_scheduled_tokens` ≥ 1 | 固定为 1 |
-| **计算特征** | 计算量大，可并行处理多个 token | 逐个 token，延迟敏感 |
-| **KV cache** | 首次写入（或前缀复用） | 追加写入一个位置 |
-| **调度优先级** | 优先（`waiting` 非空就不 decode） | 次要 |
-| **num_tokens 符号** | 正数（= Σ scheduled） | 负数（= -len(seqs)） |
+| 维度                | Prefill                           | Decode                         |
+| ------------------- | --------------------------------- | ------------------------------ |
+| **触发时机**        | waiting 队列非空                  | waiting 为空 + running 非空    |
+| **输入内容**        | prompt 的全部（或部分）token      | 每条 seq 上次生成的 1 个 token |
+| **每 seq token 数** | `num_scheduled_tokens` ≥ 1        | 固定为 1                       |
+| **计算特征**        | 计算量大，可并行处理多个 token    | 逐个 token，延迟敏感           |
+| **KV cache**        | 首次写入（或前缀复用）            | 追加写入一个位置               |
+| **调度优先级**      | 优先（`waiting` 非空就不 decode） | 次要                           |
+| **num_tokens 符号** | 正数（= Σ scheduled）             | 负数（= -len(seqs)）           |
 
 <div v-click class="mt-3 text-sm opacity-80">
   ⚡ <strong>性能含义</strong>：Prefill 吞吐高（一次处理多个 token），Decode 延迟低（每次只推 1 token）。引擎的吞吐统计正是靠 <code>num_tokens</code> 的正负来区分两种模式。
@@ -293,8 +321,8 @@ layout: default
 ---
 layout: section
 ---
-
 # 3. 推理主链路
+
 ## 代码走读
 
 ---
@@ -303,8 +331,10 @@ layout: default
 
 # 端到端流程图
 
-```mermaid {scale: 0.6}
-flowchart TD
+<div class="mt-6"></div>
+
+```mermaid {scale: 0.33}
+flowchart LR
     A["User calls<br/>LLM.generate"] --> B["add_request:<br/>tokenize and build Sequence"]
     B --> C["push to<br/>Scheduler.waiting"]
     C --> D{is_finished?}
@@ -321,6 +351,8 @@ flowchart TD
     D -- Yes --> M["tokenizer.decode<br/>token_ids"]
     M --> N["Return list of<br/>{text, token_ids}"]
 ```
+
+<div class="mt-6"></div>
 
 <div v-click class="mt-2 text-center text-sm opacity-80">
   这张图就是本节课的「地图」。下面我们逐框对齐到源码。
@@ -438,7 +470,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/llm_engine.py" lines="49-55" />
 
-```python {all|2|3|4|5-7}
+```python {all|2-3|4|5-7}
 def step(self):
     seqs, is_prefill = self.scheduler.schedule()     # ① 调度
     num_tokens = sum(...) if is_prefill else -len(seqs)
@@ -476,7 +508,7 @@ layout: default
 
 把三段式展开为数据流图，看清每一段的输入输出：
 
-```mermaid {scale: 0.65}
+```mermaid {scale: 0.7}
 flowchart LR
     subgraph SCHED["① schedule()"]
         A["waiting / running"] --> B["选择 seqs"]
@@ -541,22 +573,26 @@ layout: default
 <div>
 
 **不分块的问题**
-```
+
+```text
 prompt: [t1 t2 ... t8192]  ← 太长！
 batch 剩余: 4096 个位置
 → 塞不进去，死锁
 ```
+
 <div class="text-xs opacity-60 mt-1">waiting[0] 永远等待足够空间</div>
 
 </div>
 <div>
 
 **Chunked Prefill 方案** (scheduler.py:L42)
-```
+
+```text
 step 1: [t1 ... t4096] → prefill
 step 2: [t4097 ... t8192] → prefill
 step 3: [t8193] → decode
 ```
+
 <div class="text-xs opacity-60 mt-1">分片逐步处理，每片一次 prefill</div>
 
 </div>
@@ -611,6 +647,7 @@ max_num_seqs: int = 512             # 每轮最多 512 条 seq
 <div v-click class="mt-3">
 
 **调度循环的退出条件**（按优先级）：
+
 1. `remaining == 0` → token 预算用尽
 2. `num_cached_blocks == -1` → KV cache 不够，分不到 block
 3. `remaining < num_tokens and scheduled_seqs` → 已有 seq 在 batch 中，不再切分新 seq
@@ -654,8 +691,8 @@ layout: default
 
 当 KV cache 不够继续 decode 时，抢占（preemption）发生：
 
-```mermaid {scale: 0.65}
-flowchart TD
+```mermaid {scale: 0.6}
+flowchart LR
     A["从 running 取 seq"] --> B{"can_append?"}
     B -- Yes --> C["分配 block, 加入 batch"]
     B -- No --> D{"running 还有<br/>其他 seq?"}
@@ -741,12 +778,12 @@ layout: section
 ---
 
 # 4. L01 验证脚本
+
 ## L01_end_to_end.py 走读
 
 ---
 layout: default
 ---
-
 # L01_end_to_end.py：5 个 section
 
 <SourceCode file="docs/llm-inference-visual/scripts/L01_end_to_end.py" lines="1-13" />
@@ -909,13 +946,6 @@ layout: default
   answer="<code>generate</code> 中的进度统计（<code>Prefill tok/s</code> 和 <code>Decode tok/s</code>）无法区分阶段，吞吐量显示全为 0；终端进度条无法展示 prefill/decode 进度分离。但从执行逻辑上，<code>step</code> 的三段式（调度→执行→回写）依然正常运行，因为 <code>num_tokens</code> 只是统计量，不参与控制流。"
 />
 
-<SelfTest
-  id="l01-q3"
-  type="text"
-  question="3. generate 的 while 循环为什么用 scheduler.is_finished() 而非 while True + break？"
-  answer="<code>scheduler.is_finished()</code> 委托给调度器判断所有 seq 的状态，考虑了 waiting 和 running 两个队列。用 <code>while True + break</code> 需要在循环体内手动检查每一步的输出，容易漏掉边界条件（比如：最后一个 step 同时结束 vs 已经全部结束但还有一次空循环）。好处是将完成判定的职责集中到调度器，符合单一职责原则。"
-/>
-
 ---
 layout: default
 ---
@@ -923,11 +953,24 @@ layout: default
 # 4.2 课后自测题（续）
 
 <SelfTest
+  id="l01-q3"
+  type="text"
+  question="3. generate 的 while 循环为什么用 scheduler.is_finished() 而非 while True + break？"
+  answer="<code>scheduler.is_finished()</code> 委托给调度器判断所有 seq 的状态，考虑了 waiting 和 running 两个队列。用 <code>while True + break</code> 需要在循环体内手动检查每一步的输出，容易漏掉边界条件（比如：最后一个 step 同时结束 vs 已经全部结束但还有一次空循环）。好处是将完成判定的职责集中到调度器，符合单一职责原则。"
+/>
+
+<SelfTest
   id="l01-q4"
   type="text"
   question="4. 什么时候会触发 Chunked Prefill？被切分的 seq 在下一次 step 中会发生什么？"
   answer="<strong>触发条件</strong>：当 waiting[0] 的待处理 token 数超过 <code>max_num_batched_tokens - num_batched_tokens</code>（本轮剩余 token 预算），且 scheduled_seqs 为空（本条是 batch 的第一条）时，触发 chunked prefill。seq 被切分，<code>num_scheduled_tokens</code> 设为分片大小而非全量。<br><strong>下一次 step</strong>：seq 仍留在 waiting（未完成 prefill），下一轮 schedule 再次选择它继续处理剩余的 token。此时 <code>block_table</code> 已存在，走 <code>else</code> 分支。直到 <code>num_cached_tokens == num_tokens</code>，最后一轮不再进入 chunked 分支，<code>append_token</code> 才被调用。"
 />
+
+---
+layout: default
+---
+
+# 4.2 课后自测题（续二）
 
 <SelfTest
   id="l01-q5"

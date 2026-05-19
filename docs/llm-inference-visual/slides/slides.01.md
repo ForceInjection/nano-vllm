@@ -10,6 +10,12 @@ background: /background.svg
 nano-vllm 实战课程 · 从源码走读 LLM 推理引擎
 </div>
 
+<!--
+本节课从用户调用 LLM.generate("你好") 出发，追踪到引擎内部的 step() 循环，目标是建立对推理引擎主链路的"地图感"。
+
+建议打开 nanovllm/llm.py 和 nanovllm/engine/llm_engine.py 让学生边看代码边听。
+-->
+
 ---
 layout: default
 ---
@@ -49,16 +55,17 @@ layout: default
 
 # 本课在课程中的位置
 
+<div style="height: 50px;"></div>
 <div class="mt-4 text-sm max-w-2xl mx-auto">
 
 <div class="flex justify-center gap-1 mb-2">
   <div class="bg-blue-600 text-white rounded px-3 py-1.5 font-bold w-28 text-center">L01<br/><span class="text-xs font-normal opacity-80">generate→step</span></div>
   <div class="flex items-center text-gray-400 text-lg">→</div>
-  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L02<br/><span class="text-xs text-gray-400">Sequence</span></div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L02<br/><span class="text-xs text-gray-400">Sequence</span></div>
   <div class="flex items-center text-gray-400 text-lg">→</div>
-  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L03<br/><span class="text-xs text-gray-400">调度器</span></div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L03<br/><span class="text-xs text-gray-400">调度器</span></div>
   <div class="flex items-center text-gray-400 text-lg">→</div>
-  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L04<br/><span class="text-xs text-gray-400">Block 管理</span></div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L04<br/><span class="text-xs text-gray-400">Block 管理</span></div>
 </div>
 
 <div class="flex justify-center mb-1">
@@ -66,13 +73,13 @@ layout: default
 </div>
 
 <div class="flex justify-center gap-1">
-  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L05<br/><span class="text-xs text-gray-400">Prefill</span></div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L05<br/><span class="text-xs text-gray-400">Prefill</span></div>
   <div class="flex items-center text-gray-400 text-lg">→</div>
-  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L06<br/><span class="text-xs text-gray-400">Decode</span></div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L06<br/><span class="text-xs text-gray-400">Decode</span></div>
   <div class="flex items-center text-gray-400 text-lg">→</div>
-  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L07<br/><span class="text-xs text-gray-400">Attention</span></div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L07<br/><span class="text-xs text-gray-400">Attention</span></div>
   <div class="flex items-center text-gray-400 text-lg">→</div>
-  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-24 text-center">L08<br/><span class="text-xs text-gray-400">优化全景</span></div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L08<br/><span class="text-xs text-gray-400">优化全景</span></div>
 </div>
 
 </div>
@@ -85,6 +92,10 @@ layout: default
   <strong>L05-L08：模型执行层</strong><br/>张量如何拼装、注意力如何计算、优化手段有哪些
 </div>
 </div>
+
+<!--
+L01-L04 是调度层（系统如何管理请求），L05-L08 是执行层（张量如何计算）。本课作为第一课，后续所有课程都建立在本课主干基础上，务必让学生理解三段式框架。
+-->
 
 ---
 layout: default
@@ -101,6 +112,10 @@ layout: default
 | 代码走读 | 40 min | `LLM` → `add_request` → `step` 三段式 → Prefill/Decode → postprocess |
 | 脚本演示 | 15 min | 运行 L01_end_to_end.py，5 个 section 逐一验证                        |
 | 动手练习 | 10 min | 自测题 + 代码观察                                                    |
+
+<!--
+原理铺垫 20 分钟快速回顾 Transformer，如果学生已有基础可以加速。代码走读 40 分钟是核心，需要集中注意力。脚本演示环节建议提前确认每个人的终端环境已就绪。
+-->
 
 ---
 layout: default
@@ -134,6 +149,10 @@ layout: default
 
 </div>
 
+<!--
+建议先让学生读一遍，带着问题听课。课后可以回到这页自检。Q1 关于 LLM/LLMEngine 的继承关系在 llm.py 中只有 2 行代码，非常直观，可以作为开场提问。
+-->
+
 ---
 layout: section
 ---
@@ -141,6 +160,10 @@ layout: section
 # 2. 原理说明
 
 ## 从文字到 token 再到生成
+
+<!--
+本节进入原理说明，覆盖 Transformer 架构、Tokenizer 和自回归生成。如果学生已有 LLM 基础可以快速翻过；如果是新手，建议在 Transformer 概览上多花时间。强调三个小节之间的递进关系：模型是什么 → 输入怎么来 → 输出怎么一步步产生。
+-->
 
 ---
 layout: default
@@ -179,6 +202,10 @@ flowchart LR
 </div>
 </div>
 
+<!--
+把 Transformer 比喻成"黑箱函数"——输入 token_ids，输出 next_token 的概率分布。不要深入注意力机制细节，第 7 课才展开。重点让学生记住 Embedding → N 层 Block → LM Head 三段结构，以及每层输入输出形状不变。
+-->
+
 ---
 layout: default
 ---
@@ -204,6 +231,10 @@ flowchart LR
 <div v-click class="mt-3 text-sm opacity-80">
   🔑 <strong>关键</strong>：每层的输入输出形状相同（都是 <code>[seq_len, hidden_dim]</code>），因此可以堆叠任意多层。只有 LM Head 把维度从 hidden_dim 映射到词表大小。
 </div>
+
+<!--
+以"你好世界"3 token 为例追踪数据形状变化。强调形状 [seq_len, hidden_dim] 在层与层之间保持不变。这是理解 prefill/decode 的基础——prefill 一次处理整个 seq_len，decode 每次只处理 1 个 token。
+-->
 
 ---
 layout: default
@@ -233,6 +264,10 @@ tokenizer.encode("你好, nano-vllm!") # → [108386, 11, 2037, 45, ...]
   💡 Qwen3-0.6B 词表大小 = <strong>151,936</strong>。每个 token_id 都是 0~151935 之间的整数。LM Head 最终输出的 logits 也是这个大小的向量。
 </div>
 
+<!--
+演示英文、中文、混合三种情况的 tokenize 结果。特别点出 Qwen3 词表 151936 这个数字——LM Head 输出层的大小。可以现场打开 Python REPL 运行 tokenizer.encode("你好世界") 展示。
+-->
+
 ---
 layout: default
 ---
@@ -254,6 +289,10 @@ def add_request(self, prompt, sampling_params):
 <div v-click class="mt-4 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   <code>add_request</code> 是用户 prompt 进入引擎的<strong>唯一入口</strong>。它的第一行就是 <code>tokenizer.encode(prompt)</code>——没有这步，引擎不知道要处理什么。
 </div>
+
+<!--
+打开 nanovllm/engine/llm_engine.py 的 add_request 方法(43-47 行)，定位 tokenizer.encode 这一行。强调 add_request 是 prompt 进入引擎的唯一入口。可以现场查看 llm_engine.py 对应代码段。
+-->
 
 ---
 layout: default
@@ -299,6 +338,10 @@ flowchart TD
   这就是为什么 <code>generate</code> 里有一个 while 循环反复调用 <code>step()</code>
 </div>
 
+<!--
+Transformer 每次只预测一个 token——这是推理引擎设计最根本的约束。用"读题目 vs 写答案"的类比帮助学生理解 prefill vs decode。关键句：这就是 generate 里有 while 循环反复调用 step() 的原因。可以追问学生：如果每一步都重新计算前文会怎样？
+-->
+
 ---
 layout: default
 ---
@@ -318,12 +361,20 @@ layout: default
   ⚡ <strong>性能含义</strong>：Prefill 吞吐高（一次处理多个 token），Decode 延迟低（每次只推 1 token）。引擎的吞吐统计正是靠 <code>num_tokens</code> 的正负来区分两种模式。
 </div>
 
+<!--
+逐一解释表格中每一行的含义。特别强调 num_tokens 符号的设计意图：正数=prefill（吞吐），负数=decode（延迟）。可以提问学生：为什么 decode 阶段每 seq 固定只有一个 token？这跟自回归的特性有什么关系？
+-->
+
 ---
 layout: section
 ---
 # 3. 推理主链路
 
 ## 代码走读
+
+<!--
+建议学生打开编辑器，跟随幻灯片逐一浏览对应的源文件。本节顺序：端到端流程图 → LLM 别名 → generate 主循环 → add_request → step 三段式 → prefill/decode 分支 → postprocess。
+-->
 
 ---
 layout: default
@@ -357,6 +408,10 @@ flowchart LR
 <div v-click class="mt-2 text-center text-sm opacity-80">
   这张图就是本节课的「地图」。下面我们逐框对齐到源码。
 </div>
+
+<!--
+这张图是本课的"地图"。花 2 分钟讲解整个流程，强调循环结构（图中回到 is_finished? 的箭头）。告诉学生后面每一页都会对齐到这张图的某个方框。可以让学生截屏或手绘这张图作为笔记。
+-->
 
 ---
 layout: default
@@ -392,6 +447,10 @@ class LLM(LLMEngine):
 </div>
 </div>
 
+<!--
+打开 nanovllm/llm.py，只有 2 行代码。LLM 直接继承 LLMEngine 且不新增任何方法。可以问学生为什么这样设计——解耦 API 和实现、方便扩展异步接口。打开 Python 用 issubclass 验证。
+-->
+
 ---
 layout: default
 ---
@@ -422,6 +481,10 @@ def generate(self, prompts, sampling_params):
 <div v-click class="mt-2 text-xs opacity-60">
   数据形态：输入 <code>prompts: list[str]</code> → 中间 <code>Sequence</code> → 输出 <code>list[{"text": str, "token_ids": list[int]}]</code>
 </div>
+
+<!--
+打开 llm_engine.py 的 generate 方法。分三部分讲解：for 循环入队（add_request）、while 循环 step（核心循环）、最后 detokenize 返回。强调数据形态转换：list[str] → Sequence → list[dict]。动画逐行高亮代码。
+-->
 
 ---
 layout: default
@@ -462,6 +525,10 @@ def add_request(self, prompt, sampling_params):
 </div>
 </div>
 
+<!--
+逐行讲解 add_request 的三个步骤：tokenize → 包装 Sequence → scheduler.add。可以用板书展示数据流：字符串 → tokenizer.encode → list[int] → Sequence → waiting。提示学生 L01 脚本 §2 会验证这一流程。
+-->
+
 ---
 layout: default
 ---
@@ -500,6 +567,10 @@ def step(self):
 
 </div>
 
+<!--
+step 是本课最重要的函数。强调三段式：schedule（调度）→ run（执行）→ postprocess（回写）。每次 step 只走一种模式（prefill 或 decode），由 is_prefill 标志区分。让学生记住这个框架，后续课程会对每段分别深入。
+-->
+
 ---
 layout: default
 ---
@@ -531,6 +602,10 @@ flowchart LR
   三个步骤<strong>同步串行</strong>执行。一次 step 只走一种模式（prefill 或 decode），不混合。
 </div>
 
+<!--
+用 mermaid 图展示三段式的输入输出。强调三个步骤同步串行执行，不混合 prefill 和 decode。可以问学生：schedule 和 allocate 的关系是什么？为什么 postprocess 需要 hash_blocks？
+-->
+
 ---
 layout: default
 ---
@@ -560,6 +635,10 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
 <div v-click class="mt-2 text-sm">
   🔑 <strong>三个关键概念</strong>：Chunked Prefill、前缀缓存命中、token 预算。下面逐一展开。
 </div>
+
+<!--
+打开 scheduler.py 的 prefill 循环。讲解三个关键概念：Chunked Prefill（长 prompt 分片）、前缀缓存（复用已计算的 KV）、token 预算（max_num_batched_tokens）。不要深入细节，后续三页逐一展开。
+-->
 
 ---
 layout: default
@@ -602,6 +681,10 @@ step 3: [t8193] → decode
   ⚠️ <strong>约束</strong>：Chunked prefill 只对 batch 的<strong>第一条</strong> seq 允许切分（<code>if remaining < num_tokens and scheduled_seqs: break</code>）。这是为了避免所有 seq 都被切分导致调度复杂度爆炸。
 </div>
 
+<!--
+当 prompt 超过 max_num_batched_tokens 时需要分片处理。用 8192 token → 4096+4096 的例子演示。强调约束：只有 batch 中第一条 seq 允许分片。可以问学生：不分片会有什么问题？（waiting[0] 永远等不到足够空间，死锁）
+-->
+
 ---
 layout: default
 ---
@@ -625,6 +708,10 @@ if not seq.block_table:
 <div v-click class="mt-3 text-sm">
   <strong>例子</strong>：prompt 有 1024 token，block_size=256，命中 2 个 cached block → 只需计算 1024 - 2×256 = <strong>512 token</strong>。详见第 4 课。
 </div>
+
+<!--
+打开 scheduler.py:35-39，讲解 can_allocate 返回值含义。命中的块不需要重复计算。举例说明节省的计算量。预告第 4 课会深入 block_manager 的前缀缓存机制。
+-->
 
 ---
 layout: default
@@ -658,6 +745,10 @@ max_num_seqs: int = 512             # 每轮最多 512 条 seq
   💡 <strong>为什么设上限？</strong>控制单次前向的计算量，防止延迟尖峰。16384 token ≈ 一次处理约 64 条 256-token 的短 prompt，或 1 条长 prompt 的 chunk。
 </div>
 
+<!--
+三个退出条件逐一讲解。token 预算就像车辆载重限制，超载了要分批发车。16384 意味着一次最多处理约 64 条短 prompt 或 1 条长 prompt 的 chunk。这个值可以在配置中调整。
+-->
+
 ---
 layout: default
 ---
@@ -686,6 +777,10 @@ while self.running and len(scheduled_seqs) < self.max_num_seqs:
     return scheduled_seqs, False
 ```
 
+<!--
+打开 scheduler.py:57-73 的 decode 循环。每个 seq 每步固定 1 个 token，FIFO 顺序调度。重点讲解 while/else 配合 preempt 的结构——当 KV cache 不够时如何抢占队尾。可以画流程图辅助理解。
+-->
+
 ---
 layout: default
 ---
@@ -710,6 +805,10 @@ flowchart LR
 <div v-click class="mt-3 text-sm">
   ⚠️ <strong>为什么抢队尾？</strong>FIFO 队列，队尾是最后进入的 seq，抢占代价最小（已生成的 token 最少）。抢占后 seq 回到 waiting，下轮重新走 prefill 恢复——原先已生成的 token 需要重新计算。
 </div>
+
+<!--
+抢占是调度器的兜底策略。强调"抢队尾不抢队首"的原因：队尾最年轻重算代价最小。抢占后 seq 回到 waiting 重新走 prefill。这是一个常见的面试题考点。可以问学生：抢占一条 seq 的代价有多大？
+-->
 
 ---
 layout: default
@@ -738,6 +837,10 @@ def postprocess(self, seqs, token_ids, is_prefill):
 <div v-click class="mt-3 text-sm">
   ✅ <strong>两种完成条件</strong>：<code>token_id == eos</code>（模型自己说「结束了」）或 <code>num_completion_tokens == max_tokens</code>（达到用户设定的上限）
 </div>
+
+<!--
+打开 scheduler.py:81-92。postprocess 做三件事：hash_blocks 注册前缀缓存、更新计数器、完成判定。特别注意 chunked prefill 的回写逻辑——只累计计数器不 append，否则会错误地追加采样 token。
+-->
 
 ---
 layout: default
@@ -777,6 +880,10 @@ else:
   💡 这就是进度条上 <code>Prefill: 1234 tok/s</code> 和 <code>Decode: 56 tok/s</code> 分开显示的原理。两者的吞吐量级差异很大（prefill 一次处理多个 token，decode 逐 token 串行）。
 </div>
 
+<!--
+num_tokens 的符号设计很巧妙：正数=∑num_scheduled_tokens（prefill），负数=-len(seqs)（decode）。这个设计使 generate 循环可分开统计两种吞吐。进度条上的 Prefill tok/s 和 Decode tok/s 就是基于这个区分。
+-->
+
 ---
 layout: section
 ---
@@ -784,6 +891,10 @@ layout: section
 # 4. L01 验证脚本
 
 ## L01_end_to_end.py 走读
+
+<!--
+过渡页。从代码走读进入验证脚本环节。本节通过运行 L01_end_to_end.py 来验证前面讲解的所有概念。提醒学生准备好模型权重路径，可以用环境变量 NANOVLLM_MODEL_PATH 指定。
+-->
 
 ---
 layout: default
@@ -816,6 +927,10 @@ L01 练习：从 LLM.generate 走到 step 循环
 <div class="bg-red-500/10 p-2 rounded">§5<br/><strong>prefill/decode<br/>吞吐统计</strong></div>
 </div>
 
+<!--
+展示 5 个 section 的分布图。每个 section 对应一个验证要点：LLM 别名 → add_request → step 三段式 → generate 输出 → 吞吐统计。建议按顺序依次运行，每次 pause 解释关键断言。
+-->
+
 ---
 layout: default
 ---
@@ -840,6 +955,10 @@ print(f"tokenizer.encode('{prompt}') → {token_ids}")
 <div v-click class="mt-3 text-sm">
   <strong>add_request 的输入/输出契约</strong>：<code>prompt(str)</code> → <code>tokenizer.encode</code> → <code>token_ids(list[int])</code> → <code>Sequence</code> → <code>scheduler.add(seq)</code> → <code>waiting 队列</code>
 </div>
+
+<!--
+§1 用 assert issubclass(LLM, LLMEngine) 验证别名关系。§2 演示 tokenize 流程。可以现场运行这两段代码，让学生看到实际输出值。强调 token_ids 对应关系：Hello → 9707 等。
+-->
 
 ---
 layout: default
@@ -867,6 +986,10 @@ assert llm.tokenizer.decode(output["token_ids"]) == output["text"]
 <div v-click class="mt-2 text-sm">
   ✅ <strong>返回结构保证</strong>：<code>list[{"text": str, "token_ids": list[int]}]</code>，text = tokenizer.decode(token_ids)
 </div>
+
+<!--
+§3 展示三段式数据流。§4 演示一次真实推理，检查返回值是否满足 {"text": str, "token_ids": list[int]} 契约。强调 text = tokenizer.decode(token_ids) 的等价性验证可以现场运行验证。
+-->
 
 ---
 layout: default
@@ -902,6 +1025,10 @@ while not self.scheduler.is_finished():
   📊 <strong>运行脚本时的实际输出</strong>：进度条会同时显示 <code>Prefill tok/s</code> 和 <code>Decode tok/s</code>。对于短 prompt + 长输出，Prefill 阶段的数值远大于 Decode。
 </div>
 
+<!--
+§5 演示 num_tokens 的正负符号如何影响吞吐统计。实际运行时进度条上 Prefill tok/s 远大于 Decode tok/s。让学生观察短 prompt + 长输出场景下的吞吐变化趋势。
+-->
+
 ---
 layout: default
 ---
@@ -930,6 +1057,10 @@ python L01_end_to_end.py
 
 </div>
 
+<!--
+三个观察要点：源码行号是否对齐幻灯片、num_tokens 正负变化趋势、text 与 token_ids 的对应关系。建议学生打开两个终端窗口，一个运行脚本一个查看源码，逐一比对。
+-->
+
 ---
 layout: default
 ---
@@ -949,6 +1080,10 @@ layout: default
   question="2. 如果 step() 返回的 num_tokens 始终为 0，代码中哪些地方会受到影响？"
   answer="<code>generate</code> 中的进度统计（<code>Prefill tok/s</code> 和 <code>Decode tok/s</code>）无法区分阶段，吞吐量显示全为 0；终端进度条无法展示 prefill/decode 进度分离。但从执行逻辑上，<code>step</code> 的三段式（调度→执行→回写）依然正常运行，因为 <code>num_tokens</code> 只是统计量，不参与控制流。"
 />
+
+<!--
+Q1-Q2。如果时间充裕可现场让学生讨论答案，否则布置为课后作业。Q1 关注 LLM/LLMEngine 的解耦设计意图，Q2 关注 num_tokens 作为统计量而非控制流的角色。
+-->
 
 ---
 layout: default
@@ -970,6 +1105,10 @@ layout: default
   answer="<strong>触发条件</strong>：当 waiting[0] 的待处理 token 数超过 <code>max_num_batched_tokens - num_batched_tokens</code>（本轮剩余 token 预算），且 scheduled_seqs 为空（本条是 batch 的第一条）时，触发 chunked prefill。seq 被切分，<code>num_scheduled_tokens</code> 设为分片大小而非全量。<br><strong>下一次 step</strong>：seq 仍留在 waiting（未完成 prefill），下一轮 schedule 再次选择它继续处理剩余的 token。此时 <code>block_table</code> 已存在，走 <code>else</code> 分支。直到 <code>num_cached_tokens == num_tokens</code>，最后一轮不再进入 chunked 分支，<code>append_token</code> 才被调用。"
 />
 
+<!--
+Q3-Q4。Q3 关于 is_finished 的设计哲学（单一职责），Q4 关于 Chunked Prefill 的触发条件和恢复流程。建议学生画流程图辅助回答。
+-->
+
 ---
 layout: default
 ---
@@ -982,6 +1121,10 @@ layout: default
   question="5. 在 decode 阶段，为什么被抢占的 seq 总是队尾的而不是其他位置？"
   answer="running 是 FIFO 队列（<code>deque</code>），队尾是最后入队的 seq。在 decode 阶段，后入队的 seq 通常更「年轻」——已生成的 token 更少，抢占后重新 prefill 的代价更小。相比之下，队首的 seq 可能已经生成了几十个 token，如果抢占它，下次 prefill 恢复时需要重新计算大量历史 token，造成更多浪费。<br>此外，<code>popleft()</code> 从队首取是调度策略，<code>pop()</code> 从队尾抢是抢占策略，两者配合使得 running 就像一个「优先调度早到的、优先牺牲晚到的」的缓冲区。"
 />
+
+<!--
+Q5 关于抢占机制原理，难度较高。需要理解 deque 的 FIFO 特性和抢占策略。running 的 popleft/pop 配合使得"早到的优先调度、晚到的优先牺牲"。这是一个很好的系统设计思维训练题。
+-->
 
 ---
 layout: center
@@ -1003,3 +1146,7 @@ layout: center
 <div class="mt-10">
   <a href="#" class="text-blue-400 hover:underline text-lg">下一课：Sequence 生命周期 →</a>
 </div>
+
+<!--
+本课四个核心要点：端到端流程、Prefill vs Decode、调度→执行→回写三段式、L01 脚本验证。提醒学生下一课深入 Sequence 生命周期。可以留出 5 分钟答疑时间，或请一位学生用自己的话总结 generate 到 step 的完整路径。
+-->

@@ -1,0 +1,13 @@
+{
+  "name": "nano-vllm-slides",
+  "private": true,
+  "scripts": {
+    "dev": "slidev",
+    "build": "slidev build --base ./",
+    "export": "slidev export"
+  },
+  "dependencies": {
+    "@slidev/cli": "^52.6.3",
+    "@slidev/theme-default": "^0.25.0"
+  }
+}

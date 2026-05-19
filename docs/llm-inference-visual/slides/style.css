@@ -1,0 +1,46 @@
+/* nano-vllm 课件自定义样式 */
+
+/* 中文字体优化 */
+:root {
+  --slidev-font-sans: 'Noto Sans SC', 'Microsoft YaHei', 'PingFang SC', system-ui, sans-serif;
+  --slidev-font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+}
+
+/* 代码块中的注释用更柔和的颜色 */
+.slidev-code .line {
+  min-height: 1.5em;
+}
+
+/* 表格样式增强 */
+table {
+  font-size: 0.9rem;
+}
+
+/* 自测题过渡动画 */
+.selftest-enter-active,
+.selftest-leave-active {
+  transition: all 0.3s ease;
+}
+
+/* 链接样式 */
+a {
+  text-decoration: none;
+}
+a:hover {
+  text-decoration: underline;
+}
+
+/* 封面标题样式 */
+h1.text-4xl {
+  letter-spacing: 0.02em;
+}
+
+/* 代码块最大高度 + 滚动 */
+.slidev-code-wrapper {
+  max-height: 460px;
+}
+
+/* Mermaid 图表文本可读性 */
+.mermaid text {
+  font-family: var(--slidev-font-sans) !important;
+}

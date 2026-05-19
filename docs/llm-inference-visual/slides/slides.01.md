@@ -681,6 +681,9 @@ while self.running and len(scheduled_seqs) < self.max_num_seqs:
         seq.is_prefill = False
         self.block_manager.may_append(seq)   # block 满了就追加新的
         scheduled_seqs.append(seq)
+    assert scheduled_seqs                     # 至少调度一条
+    self.running.extendleft(reversed(scheduled_seqs))  # 未选中的放回
+    return scheduled_seqs, False
 ```
 
 ---
@@ -729,6 +732,7 @@ def postprocess(self, seqs, token_ids, is_prefill):
            or seq.num_completion_tokens == seq.max_tokens:
             seq.status = SequenceStatus.FINISHED        # 标记完成
             self.block_manager.deallocate(seq)          # 回收 KV blocks
+            self.running.remove(seq)                   # 移出运行队列
 ```
 
 <div v-click class="mt-3 text-sm">

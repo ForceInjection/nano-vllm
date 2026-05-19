@@ -100,12 +100,12 @@ function isWrong(index: number): boolean {
       </div>
       <button
         v-if="!submitted && selected.length > 0"
-        class="mt-2 px-4 py-1 bg-blue-600 rounded text-sm hover:bg-blue-500"
+        class="mt-2 px-4 py-1 bg-blue-600 text-white rounded text-sm hover:bg-blue-500"
         @click="submitChoice"
       >
         提交
       </button>
-      <p v-if="submitted && answer" class="mt-2 text-sm text-gray-400">
+      <p v-if="submitted && answer" class="mt-2 text-sm text-gray-200">
         正确答案：{{ answer }}
       </p>
     </div>
@@ -113,13 +113,13 @@ function isWrong(index: number): boolean {
     <!-- Text mode -->
     <div v-if="type === 'text' || !type">
       <button
-        class="px-4 py-1.5 rounded text-sm font-medium transition-colors"
-        :class="revealed ? 'bg-gray-700 hover:bg-gray-600' : 'bg-blue-600 hover:bg-blue-500'"
+        class="px-4 py-1.5 rounded text-sm font-medium text-white transition-colors"
+        :class="revealed ? 'bg-gray-600 hover:bg-gray-500' : 'bg-blue-600 hover:bg-blue-500'"
         @click="toggleReveal"
       >
         {{ revealed ? '隐藏答案' : '查看答案' }}
       </button>
-      <div v-if="revealed && answer" class="mt-3 p-3 bg-gray-800 rounded text-sm leading-relaxed" v-html="answer" />
+      <div v-if="revealed && answer" class="mt-3 p-3 bg-gray-800 rounded text-sm leading-relaxed text-gray-200 max-h-80 overflow-y-auto" v-html="answer" />
     </div>
   </div>
 </template>
@@ -130,5 +130,18 @@ function isWrong(index: number): boolean {
 }
 .choice-item:not(.opacity-50):hover {
   background: rgba(255, 255, 255, 0.05);
+}
+
+/* 答案区域的加亮文字（strong）使用醒目的亮黄色 */
+:deep(strong) {
+  color: #facc15;
+}
+
+/* 答案区域的 code 使用亮色 */
+:deep(code) {
+  color: #2563eb;
+  background: rgba(255, 255, 255, 0.1);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
 }
 </style>

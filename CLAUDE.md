@@ -67,10 +67,11 @@ No test suite, linter, or type-checker is configured in this repo.
 | Area | Paths | Notes |
 |------|-------|-------|
 | Public API | `nanovllm/llm.py`, `nanovllm/sampling_params.py`, `nanovllm/__init__.py` | `LLM` = `LLMEngine`; `SamplingParams` |
+| Config | `nanovllm/config.py` | `Config` dataclass — model path, block sizes, TP, eager; validated in `__post_init__` |
 | Engine (scheduling) | `nanovllm/engine/llm_engine.py`, `nanovllm/engine/scheduler.py`, `nanovllm/engine/sequence.py` | Request lifecycle, prefill/decode loop |
 | Engine (execution) | `nanovllm/engine/model_runner.py`, `nanovllm/engine/block_manager.py` | Model invocation, KV-cache allocation |
 | Model | `nanovllm/models/qwen3.py` | Only Qwen3 supported; TP-aware from construction |
-| Layers | `nanovllm/layers/attention.py`, `nanovllm/layers/linear.py`, `nanovllm/layers/embed_head.py`, `nanovllm/layers/rotary_embedding.py` | FlashAttention, TP linear sharding, RoPE |
+| Layers | `nanovllm/layers/attention.py`, `nanovllm/layers/linear.py`, `nanovllm/layers/embed_head.py`, `nanovllm/layers/rotary_embedding.py`, `nanovllm/layers/sampler.py`, `nanovllm/layers/layernorm.py`, `nanovllm/layers/activation.py` | FlashAttention, TP linear sharding, RoPE, sampling, RMSNorm, SiLU |
 | Utilities | `nanovllm/utils/loader.py`, `nanovllm/utils/context.py` | SafeTensors loading, thread-local context |
 
 ### Dependencies and constraints
@@ -81,4 +82,4 @@ No test suite, linter, or type-checker is configured in this repo.
 - Only Qwen3-0.6B model architecture is implemented
 - `flash-attn` may fail to `pip install` from source (CPU/memory heavy). Download the pre-built wheel from GitHub releases matching the torch+CUDA version (e.g. `flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl`). Use `ghproxy.net` if GitHub is unreachable.
 - Course exercise scripts (`docs/llm-inference-visual/scripts/`) are self-contained but share a common `show_source()`/`show_code_block()` helper for displaying nano-vllm source snippets inline. Scripts that need the model accept `sys.argv[1]` or the `NANOVLLM_MODEL_PATH` env var.
-- `AGENTS.md` provides further guidance on agent roles, workflows, and documentation conventions for the visual course under `docs/llm-inference-visual/`
+- `AGENTS.md` covers: agent role definitions, standard bug-fix/performance-change workflows, output templates, and documentation conventions for the visual course (Chinese prose, lesson structure, diagram conventions, 3-tier code reference system). Consult it when authoring or editing course materials under `docs/llm-inference-visual/`.

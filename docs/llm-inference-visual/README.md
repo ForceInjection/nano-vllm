@@ -184,3 +184,22 @@ bash run_all.sh L03 L05
 | [setup_remote.sh](./scripts/setup_remote.sh) | 远端服务器环境搭建脚本                                                       |
 
 每课末尾的 §4 练习已拆分为 **§4.1 课堂练习**（验证脚本）和 **§4.2 课后思考题**（3 道讨论题），便于课堂讲授与课后作业分开使用。
+
+### 3.3 交互式课件（Slidev）
+
+除 Markdown 教材外，本课程还提供基于 [Slidev](https://sli.dev/) 的交互式网页课件，适合课堂投影演示或自学翻页阅读。
+
+```bash
+cd docs/llm-inference-visual/slides/
+
+# 安装依赖（首次）
+npm install
+
+# 启动开发服务器 → 浏览器打开 http://localhost:3030
+bash manage.sh dev
+
+# 构建为静态 SPA（可直接打开 dist/index.html）
+bash manage.sh build
+```
+
+每课约 30+ 页，包含 Mermaid 流程图、源码逐行走读、自测题交互（点击展开答案，localStorage 记录进度）。详细使用说明见 [slides/README.md](./slides/README.md)。

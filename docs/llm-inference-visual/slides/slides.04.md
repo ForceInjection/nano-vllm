@@ -16,14 +16,34 @@ layout: default
 
 # 本课在课程中的位置
 
-```mermaid {scale: 0.7}
-flowchart LR
-    L01["L01"] --> L02["L02"] --> L03["L03"]
-    L03 --> L04["<strong>L04</strong><br/>Block 管理与前缀缓存"]
-    L04 --> L05["L05<br/>Prefill Batching"]
-    L05 --> L06["L06"] --> L07["L07"] --> L08["L08"]
-    style L04 fill:#3b82f6,color:#fff,stroke:#2563eb,stroke-width:3px
-```
+<div style="height: 50px;"></div>
+<div class="mt-4 text-sm max-w-2xl mx-auto">
+
+<div class="flex justify-center gap-1 mb-2">
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L01<br/><span class="text-xs text-gray-400">generate→step</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L02<br/><span class="text-xs text-gray-400">Sequence</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L03<br/><span class="text-xs text-gray-400">调度器</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-blue-600 text-white rounded px-3 py-1.5 font-bold w-28 text-center">L04<br/><span class="text-xs font-normal opacity-80">Block 管理</span></div>
+</div>
+
+<div class="flex justify-center mb-1">
+  <div class="text-gray-400 text-lg">↓</div>
+</div>
+
+<div class="flex justify-center gap-1">
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L05<br/><span class="text-xs text-gray-400">Prefill</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L06<br/><span class="text-xs text-gray-400">Decode</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L07<br/><span class="text-xs text-gray-400">Attention</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L08<br/><span class="text-xs text-gray-400">优化全景</span></div>
+</div>
+
+</div>
 
 <div v-click class="mt-4 text-sm opacity-80">
   L03 调度器调用 <code>can_allocate</code>、<code>may_append</code>、<code>deallocate</code>。L04 打开这些方法背后的管理器——<strong>BlockManager</strong>：显存分页 + 前缀缓存。

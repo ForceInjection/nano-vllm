@@ -16,14 +16,34 @@ layout: default
 
 # 本课在课程中的位置
 
-```mermaid {scale: 0.7}
-flowchart LR
-    L01["L01"] --> L02["L02"] --> L03["L03"] --> L04["L04"]
-    L04 --> L05["<strong>L05</strong><br/>Prefill Batching"]
-    L05 --> L06["L06<br/>Decode"]
-    L06 --> L07["L07<br/>Attention"] --> L08["L08"]
-    style L05 fill:#3b82f6,color:#fff,stroke:#2563eb,stroke-width:3px
-```
+<div style="height: 50px;"></div>
+<div class="mt-4 text-sm max-w-2xl mx-auto">
+
+<div class="flex justify-center gap-1 mb-2">
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L01<br/><span class="text-xs text-gray-400">generate→step</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L02<br/><span class="text-xs text-gray-400">Sequence</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L03<br/><span class="text-xs text-gray-400">调度器</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L04<br/><span class="text-xs text-gray-400">Block 管理</span></div>
+</div>
+
+<div class="flex justify-center mb-1">
+  <div class="text-gray-400 text-lg">↓</div>
+</div>
+
+<div class="flex justify-center gap-1">
+  <div class="bg-blue-600 text-white rounded px-3 py-1.5 font-bold w-28 text-center">L05<br/><span class="text-xs font-normal opacity-80">Prefill</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L06<br/><span class="text-xs text-gray-400">Decode</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L07<br/><span class="text-xs text-gray-400">Attention</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L08<br/><span class="text-xs text-gray-400">优化全景</span></div>
+</div>
+
+</div>
 
 <div v-click class="mt-4 text-sm opacity-80">
   L01-L04 覆盖了引擎调度层。L05 进入<strong>模型执行层</strong>：prefill 阶段模型实际"吃进去"的张量长什么样——多个请求被展平拼接成一个大批次。

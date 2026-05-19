@@ -16,13 +16,34 @@ layout: default
 
 # 本课在课程中的位置
 
-```mermaid {scale: 0.7}
-flowchart LR
-    L05["L05<br/>Prefill Batching"] --> L06["L06<br/>Decode"]
-    L06 --> L07["<strong>L07</strong><br/>Attention & KV Cache"]
-    L07 --> L08["L08<br/>优化全景图"]
-    style L07 fill:#3b82f6,color:#fff,stroke:#2563eb,stroke-width:3px
-```
+<div style="height: 50px;"></div>
+<div class="mt-4 text-sm max-w-2xl mx-auto">
+
+<div class="flex justify-center gap-1 mb-2">
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L01<br/><span class="text-xs text-gray-400">generate→step</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L02<br/><span class="text-xs text-gray-400">Sequence</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L03<br/><span class="text-xs text-gray-400">调度器</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L04<br/><span class="text-xs text-gray-400">Block 管理</span></div>
+</div>
+
+<div class="flex justify-center mb-1">
+  <div class="text-gray-400 text-lg">↓</div>
+</div>
+
+<div class="flex justify-center gap-1">
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L05<br/><span class="text-xs text-gray-400">Prefill</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L06<br/><span class="text-xs text-gray-400">Decode</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-blue-600 text-white rounded px-3 py-1.5 font-bold w-28 text-center">L07<br/><span class="text-xs font-normal opacity-80">Attention</span></div>
+  <div class="flex items-center text-gray-400 text-lg">→</div>
+  <div class="bg-gray-700 text-gray-200 rounded px-3 py-1.5 w-28 text-center">L08<br/><span class="text-xs text-gray-400">优化全景</span></div>
+</div>
+
+</div>
 
 <div v-click class="mt-4 text-sm opacity-80">
   L05/L06 准备了上下文字段。L07 把这些字段真正 <strong>"用"</strong>起来——Attention.forward 如何根据上下文选择不同的计算路径。

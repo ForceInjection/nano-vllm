@@ -15,6 +15,7 @@ fonts:
   sans: "Noto Sans SC, Microsoft YaHei, PingFang SC, sans-serif"
   mono: "JetBrains Mono, Fira Code, monospace"
 class: text-center
+background: /background.svg
 ---
 
 # nano-vllm 实战课程

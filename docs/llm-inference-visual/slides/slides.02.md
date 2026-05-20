@@ -172,6 +172,8 @@ layout: default
 
 # 2.1 状态机：WAITING → RUNNING → FINISHED
 
+<div class="flex justify-center">
+
 ```mermaid {scale: 0.7}
 stateDiagram-v2
     [*] --> WAITING: add_request
@@ -181,6 +183,8 @@ stateDiagram-v2
     RUNNING --> FINISHED: EOS / max_tokens + deallocate
     FINISHED --> [*]
 ```
+
+</div>
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   类比操作系统的进程<strong>三态模型</strong>：WAITING = ready、RUNNING = running、FINISHED = terminated。preempt 类似被换出（swap out）。

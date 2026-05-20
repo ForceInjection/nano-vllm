@@ -302,8 +302,8 @@ layout: default
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.65}
-flowchart TD
+```mermaid {scale: 0.55}
+flowchart LR
     Start["Scheduler.schedule()"] --> PF{"waiting 非空<br/>且 batch 有容量?"}
     PF -- Yes --> PF1["取 waiting[0]"]
     PF1 --> PF2{"remaining < num_tokens<br/>且 scheduled 非空?"}
@@ -335,7 +335,7 @@ layout: default
 <div class="flex justify-center">
 
 ```mermaid {scale: 0.65}
-flowchart TD
+flowchart LR
     DE["prefill 无产出<br/>进入 decode"] --> DE1["从 running 取 seq"]
     DE1 --> DE2{"can_append?"}
     DE2 -- No --> DE3["preempt<br/>释放 block 退回 waiting"]
@@ -359,49 +359,66 @@ decode 分支控制流。重点讲 can_append/preempt 的 while 循环，以及 
 layout: default
 ---
 
-# schedule()：Prefill 分支
+# schedule()：Prefill 判断条件
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="25-56" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="25-43" />
 
-```python {all|1-3|5-7|8-11|12-14|15-17|18-21}
-def schedule(self) -> tuple[list[Sequence], bool]:
-    scheduled_seqs = []
-    num_batched_tokens = 0
-    # ── Prefill ──
-    while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
-        seq = self.waiting[0]
-        remaining = self.max_num_batched_tokens - num_batched_tokens
-        if remaining == 0:
-            break                           # ① token 预算耗尽
-        if not seq.block_table:
-            n = self.block_manager.can_allocate(seq)
-            if n == -1:
-                break                       # ② KV block 耗尽
-            num_tokens = seq.num_tokens - n * self.block_size
-        else:
-            num_tokens = seq.num_tokens - seq.num_cached_tokens
-        if remaining < num_tokens and scheduled_seqs:
-            break                           # ③ chunked 限制
-        if not seq.block_table:
-            self.block_manager.allocate(seq, n)
-        seq.num_scheduled_tokens = min(num_tokens, remaining)
-        num_batched_tokens += seq.num_scheduled_tokens
-        if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:
-            seq.status = SequenceStatus.RUNNING
-            self.waiting.popleft()
-            self.running.append(seq)
-        scheduled_seqs.append(seq)
-    if scheduled_seqs:
-        return scheduled_seqs, True
+```python {all|5-6|9-10|14-15}
+# Prefill 循环 — 三个 break 退出条件
+while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
+    seq = self.waiting[0]
+    remaining = self.max_num_batched_tokens - num_batched_tokens
+    if remaining == 0:                                        # ① token 预算耗尽
+        break                           
+    if not seq.block_table:
+        n = self.block_manager.can_allocate(seq)
+        if n == -1:                                           # ② KV block 耗尽
+            break                       
+        num_tokens = seq.num_tokens - n * self.block_size
+    else:
+        num_tokens = seq.num_tokens - seq.num_cached_tokens
+    if remaining < num_tokens and scheduled_seqs:             # ③ chunked 限制
+        break                           
 ```
 
-<div class="mt-4 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>Prefill 分支三步走</strong>：检查三个退出条件（token 预算、KV block 耗尽、chunked 限制）；分配 block 并设置 <code>num_scheduled_tokens</code>；完成 prefill 的 seq 从 waiting 迁入 running。
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  三个退出条件按优先级：① token 预算用尽 → ② KV block 池耗尽 → ③ chunked prefill 仅首条可分片。条件通过后，下一页看执行动作。
 </div>
 
+<!--
+prefill 分支上半段：展示三个 break 条件的优先级。①② 是硬限制，③ 是设计约束。对照 scheduler.py L25-L43。
+-->
+
+---
+layout: default
+---
+
+# schedule()：Prefill 执行动作
+
+<SourceCode file="nanovllm/engine/scheduler.py" lines="44-56" />
+
+```python {all|2-3|4|5-8|10-13}
+# 条件通过后，执行调度动作
+    if not seq.block_table:
+        self.block_manager.allocate(seq, n)     # ① 分配 KV block
+    seq.num_scheduled_tokens = min(num_tokens, remaining)  # ② 设定 token 数
+    num_batched_tokens += seq.num_scheduled_tokens
+    if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:
+        seq.status = SequenceStatus.RUNNING     # ③ WAITING → RUNNING
+        self.waiting.popleft()
+        self.running.append(seq)
+    scheduled_seqs.append(seq)
+
+if scheduled_seqs:
+    return scheduled_seqs, True                 # ④ 本轮走 prefill
+```
+
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  四个动作：① allocate 分配 block ② 设定 num_scheduled_tokens ③ 完成的 seq 从 waiting 迁入 running ④ return True，本轮只走 prefill。
+</div>
 
 <!--
-聚焦 prefill 分支代码（L25-L56）。展示三个 break 退出条件的触发顺序，以及分配 block 和队列迁移操作。对照 scheduler.py L25-L56。
+prefill 分支下半段：四个执行动作。重点状态转换 WAITING→RUNNING 和 return True 后就不再 decode。
 -->
 ---
 

@@ -424,12 +424,11 @@ def can_allocate(self, seq: Sequence) -> int:
 
 <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
 <div class="bg-green-500/10 border-l-3 border-green-500 p-3 rounded">
-  <strong>① 命中后：共享 vs 重新取出</strong><br/>
+  ① 命中后：共享 vs 重新取出<<br/>
   ② 若 block 仍在 used 中（ref_count &gt; 0），<code>num_new_blocks</code> 减 1，原地共享。<br/>
   若已被释放（哈希映射还在但不在 used），需从 free 池重新取出——KV 数据不必重算。
 </div>
 <div class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded">
-  <strong>③④ 两种返回值</strong><br/>
   ③ 空闲不够 → <code>return -1</code>，调度器触发 preempt 腾空间后重试。<br/>
   ④ 空闲够 → <code>return num_cached_blocks</code>，<code>allocate</code> 据此决定复用多少 block。
 </div>
@@ -456,7 +455,6 @@ seq_b: [A,B,C,D, E,F,G,H, K,L,M,N]             (14 tokens → 4 blocks)
 ```python
 # 假设 seq_a 已完成前两块（完整 block）的 hash_blocks 登记
 # block_0 的哈希 h0 和 block_1 的哈希 h1 已写入 hash_to_block_id
-
 # seq_b 进入 can_allocate 的逐块检查：
 # i=0: token=[A,B,C,D], h=hash(A,B,C,D, prefix=-1)=h0
 #      → hash_to_block_id[h0]=block_0, token_ids 匹配 → num_cached_blocks=1
@@ -469,7 +467,7 @@ seq_b: [A,B,C,D, E,F,G,H, K,L,M,N]             (14 tokens → 4 blocks)
 # → 返回 num_cached_blocks = 2
 ```
 
-<div v-click class="mt-3 grid grid-cols-2 gap-3 text-sm">
+<div v-click class="mt-3 grid grid-cols-2 gap-3 text-xs">
 <div class="bg-green-500/10 border-l-3 border-green-500 p-3 rounded">
   <strong>分配结果</strong><br/>
   block_table = [block_0, block_1, new_block_0, new_block_1]<br/>
@@ -514,7 +512,7 @@ def allocate(self, seq: Sequence, num_cached_blocks: int):
     seq.num_cached_tokens = num_cached_blocks * self.block_size
 ```
 
-<div v-click class="mt-2 text-sm">
+<div v-click class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   💡 引用计数规则：cached block → ref_count+1（共享）；新 block → ref_count=1（独占）。
 </div>
 

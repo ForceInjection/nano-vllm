@@ -861,24 +861,24 @@ layout: default
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="81-92" />
 
-```python {all|4|5-6|7-8|10-12}
+```python {all|3|4-5|6-8|9-13}
 def postprocess(self, seqs, token_ids, is_prefill):
     for seq, token_id in zip(seqs, token_ids):
-        self.block_manager.hash_blocks(seq)             # 前缀缓存登记
-        seq.num_cached_tokens += seq.num_scheduled_tokens
-        seq.num_scheduled_tokens = 0
+        self.block_manager.hash_blocks(seq)             # ① 前缀缓存登记
+        seq.num_cached_tokens += seq.num_scheduled_tokens  # ② 累计已完成 token
+        seq.num_scheduled_tokens = 0                       # ② 清零本轮计数
         if is_prefill and seq.num_cached_tokens < seq.num_tokens:
-            continue                                    # chunked prefill 未写完
-        seq.append_token(token_id)                      # 追加生成的 token
+            continue                                    # ③ chunked prefill 尚未完成
+        seq.append_token(token_id)                      # ③ 追加生成的 token
         if (not seq.ignore_eos and token_id == self.eos) \
            or seq.num_completion_tokens == seq.max_tokens:
-            seq.status = SequenceStatus.FINISHED        # 标记完成
-            self.block_manager.deallocate(seq)          # 回收 KV blocks
-            self.running.remove(seq)                   # 移出运行队列
+            seq.status = SequenceStatus.FINISHED        # ④ 标记完成
+            self.block_manager.deallocate(seq)          # ④ 回收 KV blocks
+            self.running.remove(seq)                    # ④ 移出运行队列
 ```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  ✅ <strong>两种完成条件</strong>：<code>token_id == eos</code>（模型自己说「结束了」）或 <code>num_completion_tokens == max_tokens</code>（达到用户设定的上限）
+  四个步骤：① <code>hash_blocks</code> 注册前缀缓存 ② 计数器累加 + 清零 ③ chunked prefill 未竟则 <code>continue</code>，否则 <code>append_token</code> ④ 完成判定：EOS 或 max_tokens → FINISHED + 回收资源。
 </div>
 
 <!--

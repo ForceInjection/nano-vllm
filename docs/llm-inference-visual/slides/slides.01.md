@@ -191,13 +191,13 @@ flowchart LR
 ```
 
 <div class="grid grid-cols-3 gap-4 mt-3 text-sm">
-<div class="bg-gray-800/50 p-3 rounded">
+<div class="bg-blue-500/10 p-3 rounded border-l-3 border-blue-500">
   <strong>Embedding</strong><br/>整数编号 → 向量
 </div>
-<div class="bg-gray-800/50 p-3 rounded">
+<div class="bg-green-500/10 p-3 rounded border-l-3 border-green-500">
   <strong>N 层 Transformer Block</strong><br/>「互相看一看」+「各自想一想」
 </div>
-<div class="bg-gray-800/50 p-3 rounded">
+<div class="bg-purple-500/10 p-3 rounded border-l-3 border-purple-500">
   <strong>LM Head</strong><br/>最后位置的向量 → 词表大小概率
 </div>
 </div>
@@ -430,7 +430,7 @@ class LLM(LLMEngine):
 ```
 
 <div class="mt-4 grid grid-cols-2 gap-4 text-sm">
-<div class="bg-gray-800/50 p-3 rounded">
+<div class="bg-blue-500/10 p-3 rounded border-l-3 border-blue-500">
   <strong>为什么这样设计？</strong><br/>
   <ul class="mt-1 space-y-1">
     <li><code>LLM</code> 是用户友好的「外壳」</li>
@@ -438,7 +438,7 @@ class LLM(LLMEngine):
     <li>未来可扩展（如异步接口）而不影响引擎</li>
   </ul>
 </div>
-<div class="bg-gray-800/50 p-3 rounded">
+<div class="bg-green-500/10 p-3 rounded border-l-3 border-green-500">
   <strong>验证</strong><br/>
   <code>>>> from nanovllm import LLM</code><br/>
   <code>>>> issubclass(LLM, LLMEngine)</code><br/>
@@ -742,7 +742,7 @@ max_num_seqs: int = 512             # 每轮最多 512 条 seq
 
 </div>
 
-<div v-click class="mt-3 p-3 bg-gray-800/50 rounded text-sm">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   💡 <strong>为什么设上限？</strong>控制单次前向的计算量，防止延迟尖峰。16384 token ≈ 一次处理约 64 条 256-token 的短 prompt，或 1 条长 prompt 的 chunk。
 </div>
 
@@ -1022,7 +1022,7 @@ while not self.scheduler.is_finished():
 </div>
 </div>
 
-<div v-click class="mt-3 p-3 bg-gray-800/50 rounded text-sm">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   📊 <strong>运行脚本时的实际输出</strong>：进度条会同时显示 <code>Prefill tok/s</code> 和 <code>Decode tok/s</code>。对于短 prompt + 长输出，Prefill 阶段的数值远大于 Decode。
 </div>
 

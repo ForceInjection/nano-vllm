@@ -160,7 +160,7 @@ flowchart LR
 layout: default
 ---
 
-# 2.2 Preempt ≈ 操作系统换出（Swap Out）
+# Preempt ≈ 操作系统换出（Swap Out）
 
 | OS 概念 | nano-vllm 对应 |
 |---------|---------------|
@@ -185,19 +185,21 @@ layout: section
 layout: default
 ---
 
-# Scheduler 整体架构
+# 3.1 Scheduler 整体架构
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="10-17" />
 
 ```python
 class Scheduler:
-    def __init__(self, config: Config, block_manager: BlockManager):
+    def __init__(self, config: Config):
         self.max_num_seqs = config.max_num_seqs              # 512
         self.max_num_batched_tokens = config.max_num_batched_tokens  # 16384
-        self.block_manager = block_manager
+        self.eos = config.eos
+        self.block_size = config.kvcache_block_size
+        self.block_manager = BlockManager(
+            config.num_kvcache_blocks, config.kvcache_block_size)
         self.waiting: deque[Sequence] = deque()              # 等待队列
         self.running: deque[Sequence] = deque()              # 运行队列
-        self.eos = config.eos
 ```
 
 <div class="mt-4 text-sm">
@@ -342,7 +344,7 @@ def schedule(self) -> tuple[list[Sequence], bool]:
 layout: default
 ---
 
-# 3.1 Prefill 批拼接逻辑
+# 3.2 Prefill 批拼接逻辑
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="29-56" />
 
@@ -520,7 +522,7 @@ seq.num_cached_tokens = 3000 -> 5000        # 5000 == 5000 -> 执行 append_toke
 layout: default
 ---
 
-# 3.2 Decode 分支
+# 3.3 Decode 分支
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="57-73" />
 
@@ -585,7 +587,7 @@ def may_append(self, seq: Sequence):
 layout: default
 ---
 
-# 3.3 Preempt：从队尾牺牲
+# 3.4 Preempt：从队尾牺牲
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="75-79" />
 
@@ -620,7 +622,7 @@ def preempt(self, seq: Sequence):
 layout: default
 ---
 
-# 3.3 Preempt 的恢复流程
+# Preempt 的恢复流程
 
 被抢占的 seq 回到 waiting 后，下一轮 schedule 会发生什么：
 
@@ -824,7 +826,7 @@ layout: default
 layout: default
 ---
 
-# 4.2 课后自测题（续）
+# 课后自测题（续）
 
 <SelfTest
   id="l03-q3"

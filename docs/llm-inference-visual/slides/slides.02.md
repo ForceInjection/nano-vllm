@@ -54,7 +54,7 @@ layout: default
 
 </div>
 
-<div v-click class="mt-4 text-sm opacity-80">
+<div v-click class="mt-4 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
   L01 我们追踪了 <code>generate → step</code> 的大循环。L02 打开循环中反复操作的核心对象——<strong>Sequence</strong>。
 </div>
 

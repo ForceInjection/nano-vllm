@@ -10,6 +10,8 @@ background: /background.svg
 nano-vllm 实战课程 · 源码拆解 LLM 推理引擎
 </div>
 
+<!-- L04 封面，介绍 BlockManager 与 Prefix Caching 主题 -->
+
 ---
 layout: default
 ---
@@ -49,6 +51,8 @@ layout: default
   L03 调度器调用 <code>can_allocate</code>、<code>may_append</code>、<code>deallocate</code>。L04 打开这些方法背后的管理器——<strong>BlockManager</strong>：显存分页 + 前缀缓存。
 </div>
 
+<!-- 参考 slides.03.md 的课程路线图，定位 L04 在完整课程中的位置 -->
+
 ---
 layout: default
 ---
@@ -64,6 +68,8 @@ BlockManager 就像操作系统课里的内存分页管理器，把显存切成�
 | 脚本演示 | 10 min | L04_block_manager.py 的 4 个 section |
 | 动手练习 | 15 min | 构造哈希链 + 手算 prefix cache 命中 |
 | 答疑讨论 | 15 min | 为什么哈希链而不是直接比较 token_ids、碰撞处理 |
+
+<!-- 课程时间安排，参考 block_manager.py 整体结构 -->
 
 ---
 layout: default
@@ -90,12 +96,16 @@ layout: default
 
 </div>
 
+<!-- 三个核心问题引导：block_table 桥接、prefix caching 命中、ref_count 共享 -->
+
 ---
 layout: section
 ---
 
 # 2. 原理说明
 ## KV Cache 分页管理与前缀复用
+
+<!-- 进入原理说明部分，类比 OS 分页管理 -->
 
 ---
 layout: default
@@ -126,6 +136,8 @@ flowchart TD
   两条 seq 的前 8 个 token 共享相同前缀 → 共享 Block 3 和 Block 7。BlockManager 通过引用计数追踪每个 block 被多少 seq 引用。
 </div>
 
+<!-- 对应 block_manager.py 的 Block 类 + block_table 映射，类比虚拟内存分页 -->
+
 ---
 layout: default
 ---
@@ -152,12 +164,16 @@ layout: default
   <strong>链式哈希</strong>：<code>hash(block_i) = hash(token_ids_i, prefix=hash(block_{i-1}))</code>。前缀作为种子链入，确保「相同前缀、相同当前 block」→ 相同哈希值。
 </div>
 
+<!-- 对应 block_manager.py 的 ref_count 机制，类比 OS 共享只读段 -->
+
 ---
 layout: section
 ---
 
 # 3. 代码走读
 ## BlockManager 的数据结构与核心方法
+
+<!-- 进入代码走读部分，打开 block_manager.py -->
 
 ---
 layout: default
@@ -171,8 +187,8 @@ layout: default
 class BlockManager:
     def __init__(self, num_blocks: int, block_size: int):
         self.block_size = block_size
-        self.blocks = [Block(i, block_size) for i in range(num_blocks)]
-        self.free_block_ids: set[int] = set(range(num_blocks))
+        self.blocks = [Block(i) for i in range(num_blocks)]
+        self.free_block_ids: deque[int] = deque(range(num_blocks))
         self.used_block_ids: set[int] = set()
         self.hash_to_block_id: dict[int, int] = {}   # 哈希 → block_id
 ```
@@ -189,6 +205,8 @@ class BlockManager:
 </div>
 </div>
 
+<!-- 对应 block_manager.py L26-34，三个全局数据结构：blocks、free/used 集合、hash_to_block_id -->
+
 ---
 layout: default
 ---
@@ -199,7 +217,7 @@ layout: default
 
 ```python
 class Block:
-    def __init__(self, block_id: int, block_size: int):
+    def __init__(self, block_id):
         self.block_id = block_id
         self.ref_count: int = 0
         self.hash: int = -1
@@ -214,6 +232,8 @@ class Block:
     <li><code>token_ids</code>：完整 token 序列——哈希碰撞时做全等校验</li>
   </ul>
 </div>
+
+<!-- 对应 block_manager.py L8-23，Block 类的三个核心字段：ref_count、hash、token_ids -->
 
 ---
 layout: default
@@ -246,26 +266,29 @@ stateDiagram-v2
   <strong>OS 类比</strong>：ref_count &gt; 1 的 block ≈ 多个进程的共享只读页面（mmap MAP_SHARED）。当所有进程都 unmap 后物理页面才释放。nano-vllm 的 <code>hash_to_block_id</code> 则相当于文件系统 inode——即使所有引用者都释放了 block，哈希索引仍保留，可以按内容重新找回。
 </div>
 
+<!-- Block 状态转移图：Free → Allocated → Shared → Deallocating → Free -->
+
 ---
 
-# 3.3 链式哈希的计算
+# 链式哈希的计算
 
 <SourceCode file="nanovllm/engine/block_manager.py" lines="35-41" />
 
 ```python
 @classmethod
-def compute_hash(cls, token_ids: list[int], prefix: int = -1) -> int:
+def compute_hash(cls, token_ids: list[int], prefix: int = -1):
     h = xxhash.xxh64()
     if prefix != -1:
-        h.update(struct.pack("q", prefix))  # 先写入前缀哈希
-    for token_id in token_ids:
-        h.update(struct.pack("i", token_id))  # 再写入当前 block 的 token
+        h.update(prefix.to_bytes(8, "little"))
+    h.update(np.array(token_ids).tobytes())
     return h.intdigest()
 ```
 
 <div v-click class="mt-3 text-sm">
   <strong>举例</strong>：block_size=4，token_ids=[1,2,3,4]，prefix=-1 → <code>h1 = hash([1,2,3,4])</code>；下一块 token_ids=[5,6,7,8]，prefix=h1 → <code>h2 = hash(prefix=h1, [5,6,7,8])</code>。h2 ≠ hash([5,6,7,8]) 直接算的结果——因为前缀参与计算。
 </div>
+
+<!-- 对应 block_manager.py L35-41，compute_hash 的链式哈希实现，使用 xxhash -->
 
 ---
 layout: default
@@ -301,29 +324,34 @@ h2 = BlockManager.compute_hash([9,10,11,12], prefix=h1)
   链式保证 <strong>位置语义</strong>：同一个内容出现在不同位置 → 前缀不同 → 哈希值不同。这是 prefix cache 正确性的关键——只有「从头开始的连续前缀」才能命中。
 </div>
 
+<!-- 链式哈希的具体数值示例，展示链式与独立哈希的区别 -->
+
 ---
 
-# 3.4 can_allocate：逐块检查前缀命中
+# 3.3 can_allocate：逐块检查前缀命中
 
 <SourceCode file="nanovllm/engine/block_manager.py" lines="58-73" />
 
 ```python
 def can_allocate(self, seq: Sequence) -> int:
+    h = -1
     num_cached_blocks = 0
-    h: int = -1
-    for i in range(seq.num_blocks):
+    num_new_blocks = seq.num_blocks
+    for i in range(seq.num_blocks - 1):
         token_ids = seq.block(i)
-        h = self.compute_hash(token_ids, h)         # 链式计算哈希
+        h = self.compute_hash(token_ids, h)
         block_id = self.hash_to_block_id.get(h, -1)
-        if block_id != -1 and self.blocks[block_id].token_ids == token_ids:
-            num_cached_blocks += 1                    # 命中！
-        else:
-            break                                     # 链断了，后面不再查
-    num_new_blocks = seq.num_blocks - num_cached_blocks
-    if num_new_blocks > len(self.free_block_ids):
-        return -1                                     # 空闲不够
+        if block_id == -1 or self.blocks[block_id].token_ids != token_ids:
+            break
+        num_cached_blocks += 1
+        if block_id in self.used_block_ids:
+            num_new_blocks -= 1
+    if len(self.free_block_ids) < num_new_blocks:
+        return -1
     return num_cached_blocks
 ```
+
+<!-- 对应 block_manager.py L58-73，can_allocate 逐块检查前缀命中 -->
 
 ---
 layout: default
@@ -365,11 +393,13 @@ def can_allocate(self, seq: Sequence) -> int:
   </div>
 </div>
 
+<!-- 对应 block_manager.py L58-67，链式遍历逻辑：计算哈希 → 查表 → 碰撞校验 → break -->
+
 ---
 
 # can_allocate 逐行走读（下）：空闲检查与返回值
 
-```python {all|4-5|6-7|8-10}
+```python {all|2-3|4-5|6-7}
         ...
         if block_id in self.used_block_ids:       # ① 命中的 block 是否在用？
             num_new_blocks -= 1                    # ② 是 → 不需新分配
@@ -391,6 +421,8 @@ def can_allocate(self, seq: Sequence) -> int:
   <code>num_new_blocks</code> 的两种减少途径：① 原地共享（减 1），② 哈希命中但不在 used 中（不减，但需重新取出使用）。
 </div>
 </div>
+
+<!-- 对应 block_manager.py L68-73，空闲检查与返回值，-1 触发 preempt -->
 
 ---
 
@@ -440,34 +472,40 @@ seq_b: [A,B,C,D, E,F,G,H, K,L,M,N]             (14 tokens → 4 blocks)
 </div>
 </div>
 
+<!-- can_allocate 的完整命中场景示例，展示 num_cached_blocks 和 num_new_blocks 的计算 -->
+
 ---
 
-# 3.5 allocate：复用命中的 block + 分配新的
+# 3.4 allocate：复用命中的 block + 分配新的
 
 <SourceCode file="nanovllm/engine/block_manager.py" lines="75-92" />
 
-```python {all|4-7|9-12}
+```python
 def allocate(self, seq: Sequence, num_cached_blocks: int):
-    # 先复用命中的 cached blocks
+    assert not seq.block_table
+    h = -1
     for i in range(num_cached_blocks):
-        h = self.compute_hash(seq.block(i), h)
+        token_ids = seq.block(i)
+        h = self.compute_hash(token_ids, h)
         block_id = self.hash_to_block_id[h]
+        block = self.blocks[block_id]
+        if block_id in self.used_block_ids:
+            block.ref_count += 1
+        else:
+            block.ref_count = 1
+            self.free_block_ids.remove(block_id)
+            self.used_block_ids.add(block_id)
         seq.block_table.append(block_id)
-        self.blocks[block_id].ref_count += 1      # 引用计数 +1
-
-    # 再为剩余 block 从 free 池分配
     for i in range(num_cached_blocks, seq.num_blocks):
-        block_id = self.free_block_ids.pop()
-        self.used_block_ids.add(block_id)
-        seq.block_table.append(block_id)
-        self.blocks[block_id].ref_count = 1
-
+        seq.block_table.append(self._allocate_block())
     seq.num_cached_tokens = num_cached_blocks * self.block_size
 ```
 
 <div v-click class="mt-2 text-sm">
   💡 引用计数规则：cached block → ref_count+1（共享）；新 block → ref_count=1（独占）。
 </div>
+
+<!-- 对应 block_manager.py L75-92，allocate 的两种路径：复用 cached block + 分配新 block -->
 
 ---
 layout: default
@@ -507,33 +545,33 @@ def allocate(self, seq: Sequence, num_cached_blocks: int):
   两种子场景的共性：不重新计算 KV cache，不重新分配显存——所以 prefix cache 的核心收益在于节省计算而非节省显存。
 </div>
 
+<!-- allocate 两种路径的详细对比表，包括 ref_count 和 KV 计算的区别 -->
+
 ---
 
-# 3.6 hash_blocks：将完成的 block 登记到哈希表
+# 3.5 hash_blocks：将完成的 block 登记到哈希表
 
 <SourceCode file="nanovllm/engine/block_manager.py" lines="110-120" />
 
 ```python
 def hash_blocks(self, seq: Sequence):
-    h: int = -1
-    for i in range(len(seq.block_table)):
-        block_id = seq.block_table[i]
-        block = self.blocks[block_id]
-        if block.hash != -1:
-            h = block.hash           # 已有哈希，跳过重算
-            continue
+    start = seq.num_cached_tokens // self.block_size
+    end = (seq.num_cached_tokens + seq.num_scheduled_tokens) // self.block_size
+    if start == end: return
+    h = self.blocks[seq.block_table[start - 1]].hash if start > 0 else -1
+    for i in range(start, end):
+        block = self.blocks[seq.block_table[i]]
         token_ids = seq.block(i)
-        if len(token_ids) < self.block_size:
-            break                     # 最后一个不完整 block 不登记
         h = self.compute_hash(token_ids, h)
-        block.hash = h
-        block.token_ids = token_ids
-        self.hash_to_block_id[h] = block_id  # 写入全局字典
+        block.update(h, token_ids)
+        self.hash_to_block_id[h] = block.block_id
 ```
 
 <div v-click class="mt-3 text-sm">
   🔑 <strong>只登记完整 block</strong>：最后一个不完整 block 不参与前缀复用——因为它的 token 还不全，哈希值不代表最终内容。这也是为什么 <code>postprocess</code> 在每轮之后调用 <code>hash_blocks</code>。
 </div>
+
+<!-- 对应 block_manager.py L110-120，hash_blocks 只登记完整 block 到全局哈希表 -->
 
 ---
 layout: default
@@ -579,9 +617,11 @@ seq_b = [1,2,3,4, 5,6,7,8]     → 前 7 个与 seq_a 相同，但第 8 个不�
   <strong>安全性</strong>：不完整 block 的 KV cache 只有部分 token——如果被误认为完整 block 并复用，解码阶段会读到垃圾数据。hash_blocks 只在 postprocess 中调用，随着解码推进，越来越多的 block 变完整并被登记。<code>start</code>/<code>end</code> 范围通过 <code>num_cached_tokens</code> 与 <code>num_scheduled_tokens</code> 精确界定本轮新填满的 block。
 </div>
 
+<!-- 不完整 block 不登记的安全性原因：防止读到垃圾 KV 数据 -->
+
 ---
 
-# 3.7 完整闭环：从分配到回写
+# 完整闭环：从分配到回写
 
 ```mermaid {scale: 0.6}
 flowchart LR
@@ -595,6 +635,8 @@ flowchart LR
     end
     S1 --> S2
 ```
+
+<!-- 从分配 (can_allocate+allocate) 到回写 (hash_blocks) 的完整流程 mermaid 图 -->
 
 ---
 layout: default
@@ -629,6 +671,8 @@ def deallocate(self, seq: Sequence):
     <strong>示例</strong>：共享 block 被两个 seq 引用（ref_count=2）。seq_a deallocate → ref_count=1（未释放）。seq_b deallocate → ref_count=0 → 回到 free 池。后续新 seq 如果哈希链匹配，仍可从 hash_to_block_id 找到它——block 的 KV cache 数据不需要重新计算。
   </div>
 </div>
+
+<!-- 对应 block_manager.py L94-101，deallocate 逆序遍历 + ref_count 递减回收 -->
 
 ---
 
@@ -675,12 +719,16 @@ flowchart TD
 </div>
 </div>
 
+<!-- BlockManager 四个主入口方法与 Scheduler 三个触发点的完整调用链 mermaid 图 -->
+
 ---
 layout: section
 ---
 
 # 4. L04 验证脚本
 ## L04_block_manager.py 走读
+
+<!-- 进入 L04_block_manager.py 验证脚本走读 -->
 
 ---
 layout: default
@@ -715,6 +763,8 @@ layout: default
 </div>
 </div>
 
+<!-- L04_block_manager.py 的四个验证 section 简介 -->
+
 ---
 layout: default
 ---
@@ -739,6 +789,8 @@ bm.allocate(seq_b, cached_b)
 assert seq_b.block_table[:2] == seq_a.block_table[:2]  # 共享
 assert bm.blocks[0].ref_count == 2                     # 两个引用
 ```
+
+<!-- §1 哈希链构造 + §2 can_allocate 命中的代码示例和断言 -->
 
 ---
 layout: default
@@ -766,6 +818,8 @@ print(f"链式哈希: h0={h0}, h1={h1}")
   📍 验收：最后一个不完整 block（[9,10]）不参与 hash——所以 seq_a 只登记 2 个 block，seq_b 的前两块可以命中。
 </div>
 
+<!-- 课堂练习：构造哈希链和手算 prefix cache 命中 -->
+
 ---
 layout: default
 ---
@@ -786,11 +840,13 @@ layout: default
   answer="<strong>影响最大的场景</strong>：系统级别的 prompt 前缀复用。例如所有请求共享一个 100-token 的 system prompt，只有最后几个 token 落在不完整 block 中。前几个完整 block 可以被复用，但最后一个不完整 block 每次都要重新计算。<br><strong>系统 prompt 场景</strong>：如果 system prompt 长度恰好多出几个 token 不满一个 block，这些 token 的 KV cache 浪费了——每次新请求都要重算最后几个 token。一个缓解方式是把 system prompt 截断/补齐到 block 边界。"
 />
 
+<!-- 课后自测题 Q1-Q2：链式哈希的意义和完整 block 登记的边界情况 -->
+
 ---
 layout: default
 ---
 
-# 4.2 课后自测题（续）
+# 课后自测题（续）
 
 <SelfTest
   id="l04-q3"
@@ -798,6 +854,8 @@ layout: default
   question="3. can_allocate 中，对于已命中但不在 used_block_ids 中的 block 不扣减 num_new_blocks。这个 block 处于什么状态？何时会出现这种状态？"
   answer="<strong>状态</strong>：block 在 <code>hash_to_block_id</code> 中有记录（曾经被填写过），但不在 <code>used_block_ids</code> 中——说明它已经被 <code>deallocate</code> 释放了。<br><strong>何时出现</strong>：一个 seq 完成了前缀写回（hash_blocks），然后被 preempt（deallocate）。block 回到 free 池，但哈希映射还在。后续 seq 的 <code>can_allocate</code> 可以在 <code>hash_to_block_id</code> 中找到它。如果这个 block 仍在 free 池中，可以重新分配给新 seq 使用（不必重新计算 KV）。这是 prefix cache 的威力——即使原 seq 已经结束，已计算的 KV block 仍可被后续请求复用。"
 />
+
+<!-- 课后自测题 Q3：已命中但不在 used_block_ids 中的 block 状态分析 -->
 
 ---
 layout: center
@@ -819,3 +877,5 @@ layout: center
 <div class="mt-10">
   <a href="#" class="text-blue-400 hover:underline text-lg">下一课：Prefill Batching 与 Context →</a>
 </div>
+
+<!-- 第 4 课总结：分页管理、链式哈希、Prefix Cache、ref_count 四个要点 -->

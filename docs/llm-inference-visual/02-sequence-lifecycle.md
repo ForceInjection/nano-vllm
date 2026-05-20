@@ -65,17 +65,17 @@ stateDiagram-v2
 ```
 
 - 状态的主控方：`Scheduler` 在每个 step 保持两个队列（`waiting/running`）并驱动上述转移（详见第 3 课）；`Sequence` 本身只负责承载状态字段。
-- 字段分组（下文§2.1–§2.4）：token_ids 类、调度计数器、KV cache 映射、TP 序列化。
+- 字段分组（下文§3.1–§3.4）：token_ids 类、调度计数器、KV cache 映射、TP 序列化。
 
-### 2.1 token 与生成结果
+### 3.1 token 与生成结果
 
 [`Sequence`](../../nanovllm/engine/sequence.py#L14-L31) 的 `token_ids` 持有"prompt + 已生成 token"的完整序列；`num_prompt_tokens` 固定为初始 prompt 长度；[`completion_token_ids`](../../nanovllm/engine/sequence.py#L51-L53) 则是 prompt 之后的生成部分。
 
-### 2.2 调度相关计数器
+### 3.2 调度相关计数器
 
 调度器用两个计数器推进 prefill（一次性处理用户输入的阶段）：[`num_cached_tokens`](../../nanovllm/engine/sequence.py#L25) 表示"已经在 KV cache 中可用"的 token 数；[`num_scheduled_tokens`](../../nanovllm/engine/sequence.py#L26) 表示"本 step 计划处理的 token 数"。在 [`Scheduler.postprocess`](../../nanovllm/engine/scheduler.py#L81-L92) 中，二者会被更新并清零（详见第 3 课）。
 
-### 2.3 KV cache 映射：block_table 与 block_size
+### 3.3 KV cache 映射：block_table 与 block_size
 
 [`Sequence.block_table`](../../nanovllm/engine/sequence.py#L28) 是该请求持有的 block_id 列表；[`Sequence.block_size`](../../nanovllm/engine/sequence.py#L15) 是每个 block 的 token 容量。`num_blocks/last_block_num_tokens` 与 `block(i)` 帮我们把 token 序列切成 block 视角；我们可以把 block_table 理解成"这个请求的 KV cache 数据存在哪些内存块里"。
 
@@ -96,7 +96,7 @@ def block(self, i):
 
 - block_size 的来源：`LLMEngine.__init__` 会将其设为配置中的 `kvcache_block_size`（见 [llm_engine.py:L17-L22](../../nanovllm/engine/llm_engine.py#L17-L22)）
 
-### 2.4 序列的可序列化：为 Tensor Parallel 服务
+### 3.4 序列的可序列化：为 Tensor Parallel 服务
 
 [`Sequence.__getstate__/__setstate__`](../../nanovllm/engine/sequence.py#L72-L83) 让对象在多进程场景中可被 pickle（Python 的对象序列化方式）。实现细节体现了一个关键选择：prefill 阶段需要完整 `token_ids`，而 decode 阶段子进程只需要 `last_token`——对应状态机中 `RUNNING` 状态下往返传递的数据体量。
 

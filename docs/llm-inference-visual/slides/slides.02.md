@@ -191,7 +191,7 @@ stateDiagram-v2
 layout: default
 ---
 
-# 2.2 状态转换由谁触发？
+# 状态转换由谁触发？
 
 每个状态转换都对应代码中的具体调用点：
 
@@ -302,7 +302,7 @@ class Sequence:
 layout: default
 ---
 
-# 3.1 逐字段走读：初始化参数
+# 逐字段走读：初始化参数
 
 <SourceCode file="nanovllm/engine/sequence.py" lines="14-32" />
 
@@ -687,7 +687,7 @@ def __setstate__(self, state):
 
 
 <!--
-__getstate__/__setstate__ 使 Sequence 可在多进程中 pickle 传输。核心优化：is_prefill=True 时序列化完整 token_ids，False 时只序列化 last_token。打开 sequence.py L72-L83。
+TP 序列化流程图：Rank 0 通过 SharedMemory 写入 pickle 数据，Event 唤醒子进程。is_prefill 条件分支清晰展示 prefill/decode 不同传输策略。
 -->
 
 ---
@@ -743,7 +743,7 @@ TP 场景下，Rank 0 通过 SharedMemory 向其他 Rank 传输序列化后的 S
 </div>
 
 <!--
-对比表展示 prefill 和 decode 的 IPC 数据量差异。结论融入两卡片的关键信息（数据量大/次数少 vs 数据量小/次数多）和状态机关联。
+对比表展示 prefill 和 decode 的 IPC 数据量差异（5 个维度）。结论融入 I/O 密集型 vs compute 密集型特征，并关联到状态机的 RUNNING 阶段。
 -->
 
 <div v-click="2" class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
@@ -863,7 +863,7 @@ print("block_size:", seq.block_size)              # 256
 
 
 <!--
-进入第四节——通过 L02_sequence.py 脚本验证前面所学。4 个 Section 覆盖字段分类、Block 公式、append_token 和 Pickle 序列化。纯 CPU 可运行。
+§1 演示创建 Sequence([1,2,3]) 后打印三大类字段初始值，与 2.1 节三类卡片（Token 数据、调度计数器、KV Cache 映射）一一对应。
 -->
 
 ---

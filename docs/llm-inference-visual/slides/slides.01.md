@@ -210,7 +210,7 @@ flowchart LR
 layout: default
 ---
 
-# 2.1 展开：数据在 Transformer 中如何流动
+# 展开：数据在 Transformer 中如何流动
 
 以一个 3 词输入为例，追踪每一步的数据形状变化：
 
@@ -272,7 +272,7 @@ tokenizer.encode("你好, nano-vllm!") # → [108386, 11, 2037, 45, ...]
 layout: default
 ---
 
-# 2.2 Tokenizer 在代码中的位置
+# Tokenizer 在代码中的位置
 
 <SourceCode file="nanovllm/engine/llm_engine.py" lines="43-47" />
 
@@ -489,7 +489,7 @@ def generate(self, prompts, sampling_params):
 layout: default
 ---
 
-# 3.2 add_request 深入：从 prompt 到 waiting 队列
+# add_request 深入：从 prompt 到 waiting 队列
 
 <SourceCode file="nanovllm/engine/llm_engine.py" lines="43-47" />
 

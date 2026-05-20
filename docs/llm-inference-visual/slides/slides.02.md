@@ -220,7 +220,9 @@ layout: default
 
 PagedAttention 的核心思想：将 KV cache 分页管理，类比操作系统虚拟内存。
 
-```mermaid {scale: 0.7}
+<div class="flex justify-center">
+
+```mermaid {scale: 0.55}
 flowchart TD
     subgraph LOGIC["逻辑层 (Sequence)"]
         T["token 序列: t0 t1 t2 t3 | t4 t5 t6 t7 | t8 t9"]
@@ -229,14 +231,13 @@ flowchart TD
         BT["[3, 7, 2]"]
     end
     subgraph PHYS["物理层 (显存 KV cache 池)"]
-        B0["Block 0"]
-        B1["Block 1"]
-        B2["Block 2: t8 t9"]
-        B3["Block 3: t0 t1 t2 t3"]
-        B7["Block 7: t4 t5 t6 t7"]
+        direction LR
+        B3["Block 3: t0..t3"] ~~~ B7["Block 7: t4..t7"] ~~~ B2["Block 2: t8 t9"] ~~~ B0["Block 0"] ~~~ B1["Block 1"]
     end
     LOGIC --> MAP --> PHYS
 ```
+
+</div>
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>好处</strong>：小粒度分配（按 block 而非整条序列）、碎片少、可动态追加、共享前缀时只需引用同一批 block

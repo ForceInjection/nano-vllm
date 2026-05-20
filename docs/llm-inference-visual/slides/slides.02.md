@@ -388,12 +388,10 @@ layout: default
 
 # 3.2 调度计数器的三个关键属性
 
-<SourceCode file="nanovllm/engine/sequence.py" lines="25-27" />
-
 ```python
 self.num_cached_tokens = 0       # 已处理完成、写入 KV cache 的 token 数
 self.num_scheduled_tokens = 0    # 本轮 step 计划处理的 token 数
-# num_tokens = len(self.token_ids)，随 append_token 动态增长
+self.num_tokens = len(token_ids)  # 总 token 数，随 append_token 动态增长
 ```
 
 <div class="mt-4 grid grid-cols-3 gap-3 text-sm">

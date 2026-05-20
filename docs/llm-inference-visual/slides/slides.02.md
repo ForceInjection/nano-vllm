@@ -496,7 +496,7 @@ def block(self, i):
 
 
 <!--
-block_table 与 block 分割公式。三个 property 在 block_table 分配、prefix cache 哈希、attention mask 构造时反复使用。打开 sequence.py L55-L62 对照阅读。
+block_table 与 block 分割公式。三个 property 在 block_table 分配、prefix cache 哈希、attention mask 构造时反复使用。打开 sequence.py L55-L65 对照阅读。
 -->
 
 ---
@@ -587,7 +587,7 @@ layout: default
 
 # block_size 从哪里来
 
-<SourceCode file="nanovllm/config.py" lines="6-18" />
+<SourceCode file="nanovllm/config.py" lines="6-22" />
 
 ```python
 @dataclass(slots=True)
@@ -993,7 +993,7 @@ for n in [1, 4, 5, 8, 9]:
 ```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  📍 验收要点：<code>num_blocks = (num_tokens + block_size - 1) // block_size</code>；<code>last_block_num_tokens = num_tokens - (num_blocks - 1) * block_size</code>（<code>sequence.py:L55-L62</code>）
+  📍 验收要点：<code>num_blocks = (num_tokens + block_size - 1) // block_size</code>；<code>last_block_num_tokens = num_tokens - (num_blocks - 1) * block_size</code>（<code>sequence.py:L55-L65</code>）
 </div>
 
 
@@ -1066,5 +1066,5 @@ layout: center
 </div>
 
 <!--
-结束页。总结 L02 四个核心收获：三大类字段（sequence.py L14-L32）、状态机（WAITING→RUNNING→FINISHED）、block 分割公式（L55-L62）、TP 序列化（L72-L83）。预告下一课：Scheduler 的队列与抢占机制。
+结束页。总结 L02 四个核心收获：三大类字段（sequence.py L14-L32）、状态机（WAITING→RUNNING→FINISHED）、block 分割公式（L55-L65）、TP 序列化（L72-L83）。预告下一课：Scheduler 的队列与抢占机制。
 -->

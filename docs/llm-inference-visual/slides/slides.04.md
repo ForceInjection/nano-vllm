@@ -115,7 +115,7 @@ layout: default
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.65}
+```mermaid {scale: 0.40}
 flowchart TD
     subgraph LOG["逻辑层 (每个 Sequence)"]
         T1["seq_a: t0..t3 | t4..t7 | t8..t9"]
@@ -370,7 +370,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/block_manager.py" lines="58-73" />
 
-```python {all|2-3|4|5-8|9}
+```python {all|2-3|4|5-7|8-9|10}
 def can_allocate(self, seq: Sequence) -> int:
     h = -1
     num_cached_blocks = 0
@@ -407,7 +407,7 @@ def can_allocate(self, seq: Sequence) -> int:
 
 # can_allocate 逐行走读（下）：空闲检查与返回值
 
-```python {all|2-3|4-5|6-7}
+```python {all|2-3|5-6|7}
         ...
         if block_id in self.used_block_ids:       # ① 命中的 block 是否在用？
             num_new_blocks -= 1                    # ② 是 → 不需新分配
@@ -590,7 +590,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/block_manager.py" lines="110-120" />
 
-```python {all|4-5|6-8}
+```python {all|4-5|6-11}
 def hash_blocks(self, seq: Sequence):
     start = seq.num_cached_tokens // self.block_size
     end = (seq.num_cached_tokens + seq.num_scheduled_tokens) // self.block_size
@@ -658,7 +658,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/block_manager.py" lines="94-101" />
 
-```python {all|2-3|4|5-7|8-9}
+```python {all|2-3|4|5-6|7-8}
 def deallocate(self, seq: Sequence):
     for block_id in reversed(seq.block_table):
         block = self.blocks[block_id]

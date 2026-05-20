@@ -799,25 +799,29 @@ layout: default
 ```python {all|3|4-9|10-13|14-16}
 # Scheduler.schedule 中的 decode 循环
 while self.running and len(scheduled_seqs) < self.max_num_seqs:
-    seq = self.running.popleft()            # FIFO 取出
+    seq = self.running.popleft()            # ① FIFO 从队首取
     while not self.block_manager.can_append(seq):
         if self.running:
-            self.preempt(self.running.pop()) # 抢占队尾，释放 block
+            self.preempt(self.running.pop()) # ② KV 不够 → 抢占队尾
         else:
-            self.preempt(seq)                # 只剩自己也被抢占
+            self.preempt(seq)                # ② 只剩自己也被抢占
             break
     else:
-        seq.num_scheduled_tokens = 1         # decode 固定 1 token/step
+        seq.num_scheduled_tokens = 1         # ③ 固定 1 token/step
         seq.is_prefill = False
-        self.block_manager.may_append(seq)   # block 满了就追加新的
+        self.block_manager.may_append(seq)   # ③ block 满了追加新的
         scheduled_seqs.append(seq)
-assert scheduled_seqs                        # 至少调度一条
-self.running.extendleft(reversed(scheduled_seqs))  # 未选中的放回队首
-return scheduled_seqs, False
+assert scheduled_seqs                        # ④ 至少调度一条
+self.running.extendleft(reversed(scheduled_seqs))  # ④ 恢复队列顺序
+return scheduled_seqs, False                 # ④ 本轮走 decode
 ```
 
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  四个关键步骤：① <code>popleft()</code> FIFO 取 seq ② <code>can_append</code> 失败则抢占队尾（或自身）③ 每条 seq 固定 1 token，<code>may_append</code> 满则扩 block ④ <code>return False</code>，本轮只走 decode。<strong>while/else</strong> 结构确保抢占失败时不会错误地调度 seq。
+</div>
+
 <!--
-打开 scheduler.py:57-73 的 decode 循环。每个 seq 每步固定 1 个 token，FIFO 顺序调度。重点讲解 while/else 配合 preempt 的结构——当 KV cache 不够时如何抢占队尾。可以画流程图辅助理解。
+decode 循环。四个关键步骤：FIFO 取 seq、抢占机制、固定 1 token/step、return False。重点讲解 while/else 配合 preempt 的结构——当 KV cache 不够时如何抢占队尾。紧接着下一页用流程图详解抢占机制。
 -->
 
 ---

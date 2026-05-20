@@ -513,12 +513,12 @@ def add_request(self, prompt, sampling_params):
   <div class="opacity-50 text-xs mt-1">tokenizer.encode("你好")<br/>→ [108386]</div>
 </div>
 <div v-click="2" class="bg-green-500/10 p-3 rounded text-center">
-  <div class="font-bold mb-1">② Sequence</div>
+  <div class="text-lg font-bold mb-1">② Sequence</div>
   <div class="opacity-70">包装请求状态</div>
   <div class="opacity-50 text-xs mt-1">token_ids + max_tokens<br/>+ temperature...</div>
 </div>
 <div v-click="3" class="bg-purple-500/10 p-3 rounded text-center">
-  <div class="font-bold mb-1">③ scheduler.add</div>
+  <div class="text-lg font-bold mb-1">③ scheduler.add</div>
   <div class="opacity-70">推入 waiting 队列</div>
   <div class="opacity-50 text-xs mt-1">下一轮 schedule()<br/>优先处理</div>
 </div>
@@ -877,7 +877,7 @@ else:
 </div>
 </div>
 
-<div v-click class="mt-3 p-2 bg-green-500/10 border-l-3 border-green-500 rounded-r text-xs">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   💡 这就是进度条上 <code>Prefill: 1234 tok/s</code> 和 <code>Decode: 56 tok/s</code> 分开显示的原理。两者的吞吐量级差异很大（prefill 一次处理多个 token，decode 逐 token 串行）。
 </div>
 

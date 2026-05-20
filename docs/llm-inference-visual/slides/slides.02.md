@@ -497,6 +497,8 @@ layout: default
 
 <div class="text-sm">
 
+这三个 property 将 token 序列切成 block 视角——`block_table` 中的每个 block_id 就对应这样一个 token 区间。用具体数值走一遍：
+
 **设定**：block_size = 256，num_tokens = 1000
 
 ```python
@@ -506,8 +508,22 @@ last_block_num_tokens = 1000 - (4 - 1) * 256  # = 1000 - 768 = 232
 
 </div>
 
-<div v-click="1" class="mt-4">
-<h4 class="text-sm font-bold mb-2">物理视图：各 block 包含的 token 范围</h4>
+<div v-click="1" class="mt-3 text-xs opacity-70">
+  此公式在 block_table 分配、prefix cache 哈希、以及 attention 计算 mask 时反复使用。
+</div>
+
+<!--
+用 block_size=256, num_tokens=1000 走一遍公式。翻到下一页看物理视图，再下一页看小数值快速验证。
+-->
+
+---
+layout: default
+---
+
+# 3.4 物理视图
+
+<div class="mt-4">
+<h4 class="text-sm font-bold mb-2">block_size = 256，num_tokens = 1000</h4>
 
 | block 索引 | token 区间 | slot 数量 |
 |:---------:|:-----------:|:--------:|
@@ -515,14 +531,25 @@ last_block_num_tokens = 1000 - (4 - 1) * 256  # = 1000 - 768 = 232
 | block(1)  | token_ids[256:512] | 256（满） |
 | block(2)  | token_ids[512:768] | 256（满） |
 | block(3)  | token_ids[768:1000]| **232**（不满） |
-</div>
 
-<div v-click="2" class="mt-4 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+<div class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>观察</strong>：前 3 个 block 各装满 256 个 token，最后一块只装 232 个。<code>last = num_tokens − (num_blocks − 1) × block_size</code>。
 </div>
+</div>
 
-<div v-click="3" class="mt-3">
-<h4 class="text-sm font-bold mb-1">快速验证（block_size = 4）</h4>
+<!--
+物理视图展示 block_size=256, num_tokens=1000 的分块结果：前三个 block 各装 256 token，最后一个只装 232。
+-->
+
+---
+layout: default
+---
+
+# 3.4 快速验证（block_size = 4）
+
+<div class="text-sm mt-4">
+
+换用更小的 block_size = 4，验证不同 token 数量下 `num_blocks` 和 `last_block_num_tokens` 的计算：
 
 | num_tokens | num_blocks | last_block_num_tokens | block(0) | block(1) | block(2) |
 |:----------:|:----------:|:---------------------:|:--------:|:--------:|:--------:|
@@ -531,15 +558,15 @@ last_block_num_tokens = 1000 - (4 - 1) * 256  # = 1000 - 768 = 232
 | 5 | 2 | 1 | [0:4] | [4:5] | — |
 | 8 | 2 | 4 | [0:4] | [4:8] | — |
 | 9 | 3 | 1 | [0:4] | [4:8] | [8:9] |
+
+<div class="mt-3 text-xs opacity-70">
+  💡 建议在 Python 交互环境中手动运行验证，感受公式的规律。
 </div>
 
-<div v-click="4" class="mt-3 text-xs opacity-70">
-  此公式在 block_table 分配、prefix cache 哈希、以及 attention 计算 mask 时反复使用。
 </div>
-
 
 <!--
-用 block_size=256, num_tokens=1000 走一遍公式。前三个 block 各装 256 token，最后一个只装 232。翻到下一页看快速验证表。
+快速验证表(block_size=4)展示从 1 到 9 个 token 时的分块结果。建议学员在 Python 交互环境中手动运行验证。
 -->
 
 ---
@@ -567,11 +594,6 @@ class Config:
 <div class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   💡 <strong>为什么必须是 256 的倍数？</strong> FlashAttention 的 Triton kernel 以 256 为 tile 大小读写 KV cache。block_size 对齐到这个 tile 可以避免跨 tile 的额外处理。
 </div>
-
-
-<!--
-快速验证表(block_size=4)展示从 1 到 9 个 token 时的分块结果。建议学员在 Python 交互环境中手动运行验证。
--->
 
 ---
 layout: default
@@ -663,8 +685,8 @@ layout: default
 
 # 3.5 TP 场景下的序列化流程图
 
-```mermaid {scale: 0.7}
-flowchart TD
+```mermaid {scale: 0.48}
+flowchart LR
     R0["Rank 0: write_shm('run', seqs)"] --> P["pickle.dumps(seqs)"]
     P --> C{"seq.is_prefill?"}
     C -- Yes --> F["序列化 token_ids<br/>(完整 prompt)"]
@@ -709,25 +731,13 @@ TP 场景下，Rank 0 通过 SharedMemory 向其他 Rank 传输序列化后的 S
 | 调用频率 | 每个请求仅 1 次（或 chunk-prefill 若干次） | 每个生成步调用 1 次 |
 </div>
 
-<div v-click="2" class="mt-4 grid grid-cols-2 gap-4 text-sm">
-<div class="bg-blue-500/10 p-3 rounded border-l-3 border-blue-500">
-  <div class="font-bold text-blue-400 mb-1">Prefill 数据量大，但次数少</div>
-  <div class="text-xs">一次传完整个 prompt，后续 decode 无需重复传输。如果被抢占（preempt），重新 prefill 时会再次传输完整 token_ids。</div>
-</div>
-<div class="bg-green-500/10 p-3 rounded border-l-3 border-green-500">
-  <div class="font-bold text-green-400 mb-1">Decode 数据量小，但次数多</div>
-  <div class="text-xs">每次 decode 只传 1 个 int，IPC 开销极低。这是 <code>__getstate__</code> 区分 prefill/decode 的核心优化动机。</div>
-</div>
-</div>
-
-<div v-click="3" class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
-  <strong>结论</strong>：prefill 是 I/O 密集型（大量数据传输），decode 是 compute 密集型（少量数据传输）。<code>is_prefill</code> 标志在序列化阶段实现了按需传输的优化策略。
-</div>
-
-
 <!--
-TP 序列化流程图：Rank 0 通过 SharedMemory 写入 pickle 数据，Event 唤醒子进程。is_prefill 条件分支清晰展示 prefill/decode 不同传输策略。
+对比表展示 prefill 和 decode 的 IPC 数据量差异。结论融入两卡片的关键信息（数据量大/次数少 vs 数据量小/次数多）和状态机关联。
 -->
+
+<div v-click="2" class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
+  <strong>结论</strong>：prefill 是 I/O 密集型——数据量大（~12KB），但每个请求仅传 1 次；decode 是 compute 密集型——数据量极小（~0.5KB），但每个 step 都要传。在状态机的 RUNNING 阶段，<code>is_prefill</code> 标志驱动按需传输策略，将高频 decode 的 IPC 开销压缩到极致。
+</div>
 
 ---
 layout: default
@@ -735,21 +745,13 @@ layout: default
 
 # 3.6 状态与 is_prefill 标志的联动
 
-<h4 class="text-sm font-bold mb-3">两个关键标志的关系</h4>
+<div class="text-sm">
 
-<div class="grid grid-cols-2 gap-4 text-sm">
-<div class="bg-blue-500/10 p-3 rounded border-l-3 border-blue-500">
-  <div class="font-bold text-blue-400 mb-1"><code>status</code></div>
-  <div>WAITING / RUNNING / FINISHED 三态，由 Scheduler 在 schedule() 和 postprocess() 中修改。</div>
-</div>
-<div class="bg-green-500/10 p-3 rounded border-l-3 border-green-500">
-  <div class="font-bold text-green-400 mb-1"><code>is_prefill</code></div>
-  <div>True / False，表示当前是否处于 prefill 阶段，决定序列化和调度行为。</div>
-</div>
+`status`（WAITING/RUNNING/FINISHED）与 `is_prefill`（True/False）是两个独立标志，各自由不同条件驱动。下表展示它们在生命周期中的联动变化：
+
 </div>
 
 <div v-click="1" class="mt-4">
-<h4 class="text-sm font-bold mb-2">状态转换中的 is_prefill 变化</h4>
 
 | 事件 | status | is_prefill | 说明 |
 |:----|:------:|:----------:|:-----|
@@ -761,17 +763,13 @@ layout: default
 | EOS / max_tokens | FINISHED | — | 推理结束 |
 </div>
 
-<div v-click="2" class="mt-4 p-3 bg-purple-500/10 border-l-3 border-purple-500 rounded-r text-sm">
-  <strong>联动逻辑</strong>：<code>is_prefill</code> 跟随 <code>num_cached_tokens &lt; num_tokens</code> 条件自动变化。当 <code>is_prefill = True</code> 时，<code>__getstate__</code> 序列化完整 token_ids；当 <code>is_prefill = False</code> 时，只序列化 last_token。
-</div>
-
-<div v-click="3" class="mt-3 p-3 bg-purple-500/10 border-l-3 border-purple-500 rounded-r text-sm">
-  <strong>关键设计</strong>：<code>is_prefill</code> 不是由 status 推导的。preempt 时 status 变为 WAITING，同时必须显式设置 <code>is_prefill = True</code>。这是因为 WAITING 状态本身不意味着需要 prefill（新请求和抢占后的请求都需要重新 prefill，但调度逻辑不同）。
+<div v-click="2" class="mt-3 p-3 bg-purple-500/10 border-l-3 border-purple-500 rounded-r text-xs">
+  <strong>联动规则</strong>：<code>is_prefill</code> 跟随 <code>num_cached_tokens &lt; num_tokens</code> 条件变化，决定 <code>__getstate__</code> 的序列化策略（完整 token_ids vs last_token）。<br/><strong>关键例外</strong>：<code>is_prefill</code> 不由 <code>status</code> 推导——preempt 将 status 回到 WAITING 时必须显式设置 <code>is_prefill = True</code>，因为新请求和抢占后请求虽同为 WAITING，调度逻辑不同。
 </div>
 
 
 <!--
-对比 prefill 和 decode 的 IPC 数据量。prefill 约 12KB(数据量大但次数少)，decode 约 0.5KB(数据量小但次数多)。这是 __getstate__ 区分策略的核心动机。
+status 和 is_prefill 的联动变化表。重点：is_prefill 不由 status 推导，preempt 时需显式设置 is_prefill = True。合并两个紫色框，提炼联动规则 + 关键例外。
 -->
 
 ---
@@ -873,25 +871,13 @@ for n in [1, 4, 5, 8, 9]:
         print(f"  block[{i}] = {seq.block(i)}")
 ```
 
-<div v-click="1" class="mt-3">
-<h4 class="text-sm font-bold mb-1">输出结果</h4>
-
-| n | num_blocks | last_block_num_tokens | block(0) | block(1) | block(2) |
-|:-:|:----------:|:---------------------:|:--------:|:--------:|:--------:|
-| 1 | 1 | 1 | [0] | — | — |
-| 4 | 1 | 4 | [0,1,2,3] | — | — |
-| 5 | 2 | 1 | [0,1,2,3] | [4] | — |
-| 8 | 2 | 4 | [0,1,2,3] | [4,5,6,7] | — |
-| 9 | 3 | 1 | [0,1,2,3] | [4,5,6,7] | [8] |
-</div>
-
-<div v-click="2" class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>公式</strong>：<code>num_blocks = (num_tokens + block_size - 1) // block_size</code>。<code>last_block_num_tokens</code> 在 num_tokens 为 block_size 的整数倍时等于 block_size（满块），否则为余数。
+<div v-click="1" class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
+  📍 运行结果参见 <strong>3.4 快速验证</strong>（block_size = 4），验证 <code>num_blocks = (num_tokens + block_size - 1) // block_size</code>。
 </div>
 
 
 <!--
-4 个验证 Section 概览。§1 字段分类、§2 Block 公式验证、§3 append_token 更新逻辑、§4 Pickle 序列化两种模式。建议逐 section 运行并观察输出。
+§2 运行代码。输出表与 3.4 快速验证重复，改为引用指回。建议学员在 Python 交互环境中手动运行观察。
 -->
 
 ---
@@ -933,39 +919,37 @@ layout: default
 
 # §3-4 总结：数据流一览
 
-<div class="text-sm">
+<div class="grid grid-cols-2 gap-4 mt-4 text-xs">
 
-两个核心操作的效果对比表：
-
-</div>
-
-<div v-click="1" class="mt-3">
+<div v-click="1">
 <h4 class="text-sm font-bold mb-2"><code>append_token</code> 操作前后</h4>
 
-| 字段 | 操作前 | 操作后（append 5） | 说明 |
-|:----|:-----:|:----------------:|:-----|
-| <code>token_ids</code> | [1,2,3] | [1,2,3,5] | 追加新 token |
-| <code>completion_token_ids</code> | [] | [5] | 记录生成 token |
-| <code>num_prompt_tokens</code> | 3 | 3 | **不变** |
-| <code>num_tokens</code> | 3 | 4 | = len(token_ids) |
+| 字段 | 操作前 | append(5) 后 |
+|:----|:-----:|:-----------:|
+| <code>token_ids</code> | [1,2,3] | [1,2,3,5] |
+| <code>completion_token_ids</code> | [] | [5] |
+| <code>num_prompt_tokens</code> | 3 | 3 |
+| <code>num_tokens</code> | 3 | 4 |
 </div>
 
-<div v-click="2" class="mt-4">
+<div v-click="2">
 <h4 class="text-sm font-bold mb-2">Pickle 序列化两种模式</h4>
 
-| 模式 | <code>is_prefill</code> | 传输内容 | 反序列化后 <code>token_ids</code> |
-|:----|:---------------------:|:-------:|:------------------------------:|
-| Prefill 序列化 | True | 完整 <code>token_ids</code> 列表 | [1,2,3,5]（完整恢复） |
-| Decode 序列化 | False | <code>last_token</code>（1 个 int） | []（为空！） |
+| 模式 | <code>is_prefill</code> | 传输内容 | 反序列化后 |
+|:----|:---------------------:|:-------:|:--------:|
+| Prefill | True | 完整 <code>token_ids</code> | [1,2,3,5] |
+| Decode | False | <code>last_token</code> | [] |
 </div>
 
-<div v-click="3" class="mt-4 p-3 bg-purple-500/10 border-l-3 border-purple-500 rounded-r text-sm">
+</div>
+
+<div v-click="3" class="mt-3 p-3 bg-purple-500/10 border-l-3 border-purple-500 rounded-r text-sm">
   <strong>重点</strong>：decode 序列化只传 last_token 是重要的 IPC 优化。如果子进程需要完整 token_ids（如被抢占），Rank 0 会重设 <code>is_prefill=True</code>，下一轮 prefill 自然发送完整数据。
 </div>
 
 
 <!--
-运行 §2 部分验证 Block 分割公式。block_size 设为 4 便于手算，遍历 n=1,4,5,8,9。鼓励学员在 Python 交互环境中手动运行观察。
+§3-4 总结：append_token 和 Pickle 的对比。两张表左右并排（grid-cols-2），去掉冗余列，结论框跨两列放下方。
 -->
 
 ---

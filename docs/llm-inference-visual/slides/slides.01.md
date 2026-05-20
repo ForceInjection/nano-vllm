@@ -613,12 +613,12 @@ flowchart LR
 layout: default
 ---
 
-# 3.3.1 Prefill 分支：一次性把 prompt 读完
+# 3.3.1 Prefill 分支：判断条件
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="29-55" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="29-43" />
 
-```python {all|3|5-6|7-9|12-13|14-16|17-21|23-24}
-# Scheduler.schedule 中的 prefill 循环
+```python {all|3|5-6|7-9|12-13}
+# Scheduler.schedule 中的 prefill 循环 — 上半段：判断能否调度
 while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
     seq = self.waiting[0]                         # 从 waiting 头部取
     remaining = self.max_num_batched_tokens - num_batched_tokens
@@ -633,7 +633,27 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
         num_tokens = seq.num_tokens - seq.num_cached_tokens
     if remaining < num_tokens and scheduled_seqs:  # 只允许第一条 chunk
         break
-    if not seq.block_table:                        # 执行分配动作
+```
+
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  🔑 三个退出条件对应三个关键概念：<strong>Chunked Prefill</strong>、<strong>前缀缓存</strong>、<strong>token 预算</strong>。条件通过后，下一页看执行动作。下面逐一展开。
+</div>
+
+<!--
+prefill 循环的上半段：三个 break 条件。逐一讲解 Chunked Prefill、前缀缓存命中、token 预算三个概念——后续三页逐一展开。
+-->
+
+---
+layout: default
+---
+
+# Prefill 分支：执行动作
+
+<SourceCode file="nanovllm/engine/scheduler.py" lines="44-55" />
+
+```python {all|2-3|4|5-8|10-11}
+# 上半段条件全部通过后，执行调度动作
+    if not seq.block_table:
         self.block_manager.allocate(seq, num_cached_blocks)
     seq.num_scheduled_tokens = min(num_tokens, remaining)
     num_batched_tokens += seq.num_scheduled_tokens
@@ -648,11 +668,11 @@ if scheduled_seqs:
 ```
 
 <div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  🔑 <strong>上半段</strong>判断条件（Chunked Prefill、前缀缓存、token 预算），<strong>下半段</strong>执行动作（allocate、设定 num_scheduled_tokens、状态转换、return）。下面逐一展开三个关键概念。
+  四个关键动作：① <code>allocate</code> 分配 KV block ② 设定 <code>num_scheduled_tokens</code> ③ WAITING → RUNNING 状态转换 ④ <code>return</code>，本轮只走 prefill，不走 decode。
 </div>
 
 <!--
-打开 scheduler.py 的 prefill 循环。讲解三个关键概念：Chunked Prefill（长 prompt 分片）、前缀缓存（复用已计算的 KV）、token 预算（max_num_batched_tokens）。不要深入细节，后续三页逐一展开。
+prefill 循环的下半段：四个执行动作。强调 return 后本轮不再 decode——prefill 优先。
 -->
 
 ---

@@ -448,7 +448,7 @@ def postprocess(self, seqs, token_ids, is_prefill):
         seq.append_token(token_id)                         # ④ 追加采样 token
 ```
 
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>生命周期</strong>：<code>schedule()</code> 设定 → <code>run()</code> 不变 → <code>postprocess()</code> 累加到 cached 然后清零。下一轮 <code>schedule()</code> 从 <code>num_cached_tokens</code> 开始取下一段。
 </div>
 
@@ -1005,7 +1005,7 @@ for n in [1, 4, 5, 8, 9]:
         print(f"  block[{i}] = {seq.block(i)}")
 ```
 
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   📍 验收要点：<code>num_blocks = (num_tokens + block_size - 1) // block_size</code>；<code>last_block_num_tokens = num_tokens - (num_blocks - 1) * block_size</code>（<code>sequence.py:L55-L62</code>）
 </div>
 

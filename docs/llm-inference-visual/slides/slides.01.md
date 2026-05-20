@@ -260,7 +260,7 @@ tokenizer.encode("你好世界")          # → [108386, 99489]
 tokenizer.encode("你好, nano-vllm!") # → [108386, 11, 2037, 45, ...]
 ```
 
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   💡 Qwen3-0.6B 词表大小 = <strong>151,936</strong>。每个 token_id 都是 0~151935 之间的整数。LM Head 最终输出的 logits 也是这个大小的向量。
 </div>
 
@@ -631,7 +631,7 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
         break
 ```
 
-<div v-click class="mt-2 text-sm">
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   🔑 <strong>三个关键概念</strong>：Chunked Prefill、前缀缓存命中、token 预算。下面逐一展开。
 </div>
 
@@ -704,7 +704,7 @@ if not seq.block_table:
     # ↑ 只需要计算未命中部分的 token
 ```
 
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>例子</strong>：prompt 有 1024 token，block_size=256，命中 2 个 cached block → 只需计算 1024 - 2×256 = <strong>512 token</strong>。详见第 4 课。
 </div>
 
@@ -803,7 +803,7 @@ flowchart LR
     H --> G
 ```
 
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   ⚠️ <strong>为什么抢队尾？</strong>FIFO 队列，队尾是最后进入的 seq，抢占代价最小（已生成的 token 最少）。抢占后 seq 回到 waiting，下轮重新走 prefill 恢复——原先已生成的 token 需要重新计算。
 </div>
 
@@ -835,7 +835,7 @@ def postprocess(self, seqs, token_ids, is_prefill):
             self.running.remove(seq)                   # 移出运行队列
 ```
 
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   ✅ <strong>两种完成条件</strong>：<code>token_id == eos</code>（模型自己说「结束了」）或 <code>num_completion_tokens == max_tokens</code>（达到用户设定的上限）
 </div>
 
@@ -953,7 +953,7 @@ print(f"tokenizer.encode('{prompt}') → {token_ids}")
 # 输出: [9707, 11, 2037, 45, 12, 5794, 0]  ← 对应 Hello , nano - vllm !
 ```
 
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>add_request 的输入/输出契约</strong>：<code>prompt(str)</code> → <code>tokenizer.encode</code> → <code>token_ids(list[int])</code> → <code>Sequence</code> → <code>scheduler.add(seq)</code> → <code>waiting 队列</code>
 </div>
 
@@ -984,7 +984,7 @@ assert "text" in output and "token_ids" in output
 assert llm.tokenizer.decode(output["token_ids"]) == output["text"]
 ```
 
-<div v-click class="mt-2 text-sm">
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   ✅ <strong>返回结构保证</strong>：<code>list[{"text": str, "token_ids": list[int]}]</code>，text = tokenizer.decode(token_ids)
 </div>
 

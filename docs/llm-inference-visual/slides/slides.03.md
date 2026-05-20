@@ -371,10 +371,10 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
     if remaining == 0:                                        # ① token 预算耗尽
         break                           
     if not seq.block_table:
-        n = self.block_manager.can_allocate(seq)
-        if n == -1:                                           # ② KV block 耗尽
+        num_cached_blocks = self.block_manager.can_allocate(seq)
+        if num_cached_blocks == -1:                                           # ② KV block 耗尽
             break                       
-        num_tokens = seq.num_tokens - n * self.block_size
+        num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
     else:
         num_tokens = seq.num_tokens - seq.num_cached_tokens
     if remaining < num_tokens and scheduled_seqs:             # ③ chunked 限制
@@ -400,7 +400,7 @@ layout: default
 ```python {all|2-3|4|5-10|12-13}
 # 条件通过后，执行调度动作
     if not seq.block_table:
-        self.block_manager.allocate(seq, n)                              # ① 分配 KV block
+        self.block_manager.allocate(seq, num_cached_blocks)             # ① 分配 KV block
     seq.num_scheduled_tokens = min(num_tokens, remaining)                # ② 设定 token 数
     num_batched_tokens += seq.num_scheduled_tokens
     if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:
@@ -429,15 +429,15 @@ prefill 分支下半段：四个执行动作。重点状态转换 WAITING→RUNN
 ```python {all|3|4-9|10-12}
     # ── Decode ──
     while self.running and len(scheduled_seqs) < self.max_num_seqs:
-        seq = self.running.popleft()              # ① FIFO 取 seq
+        seq = self.running.popleft()                            # ① FIFO 取 seq
         while not self.block_manager.can_append(seq):
             if self.running:
-                self.preempt(self.running.pop())  # ② 抢占队尾腾空间
+                self.preempt(self.running.pop())                # ② 抢占队尾腾空间
             else:
                 self.preempt(seq)
                 break
         else:
-            seq.num_scheduled_tokens = 1           # ③ 固定 1 token/step
+            seq.num_scheduled_tokens = 1                        # ③ 固定 1 token/step
             seq.is_prefill = False
             self.block_manager.may_append(seq)
             scheduled_seqs.append(seq)
@@ -461,19 +461,19 @@ layout: default
 ```python {all|5-7|8-11|12-14}
 # Scheduler.schedule 中的 prefill 循环
 while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
-    seq = self.waiting[0]                       # 从 waiting 头部看
+    seq = self.waiting[0]                                          # 从 waiting 头部看
     remaining = self.max_num_batched_tokens - num_batched_tokens
     if remaining == 0:
-        break                                   # ① token 预算耗尽
+        break                                                      # ① token 预算耗尽
     if not seq.block_table:
         num_cached_blocks = self.block_manager.can_allocate(seq)
         if num_cached_blocks == -1:
-            break                               # ② KV cache 不够
+            break                                                  # ② KV cache 不够
         num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
     else:
         num_tokens = seq.num_tokens - seq.num_cached_tokens
-    if remaining < num_tokens and scheduled_seqs:
-        break                                   # ③ chunked prefill 限制
+    if remaining < num_tokens and scheduled_seqs:                  # ③ chunked prefill 限制
+        break                                                  
 ```
 
 <div class="mt-4 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
@@ -492,24 +492,24 @@ layout: default
 
 prefill 循环中有三个 <code>break</code>，它们的执行顺序决定批拼接行为：
 
-```python {all|5|7-9|10-16|17-18}
+```python {all|5|7-9|10-16|17}
 while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
     seq = self.waiting[0]
     remaining = self.max_num_batched_tokens - num_batched_tokens
 
-    if remaining == 0:                      # 条件①
-        break                               # 优先级最高
+    if remaining == 0:                                       # 条件①
+        break                                                # 优先级最高
 
     if not seq.block_table:
-        n = self.block_manager.can_allocate(seq)
-        if n == -1:                         # 条件②
-            break                           # 优先级次之
-        num_tokens = seq.num_tokens - n * self.block_size
+        num_cached_blocks = self.block_manager.can_allocate(seq)
+        if num_cached_blocks == -1:                                          # 条件②
+            break                                            # 优先级次之
+        num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
     else:
         num_tokens = seq.num_tokens - seq.num_cached_tokens
 
     if remaining < num_tokens and scheduled_seqs:
-        break                               # 条件③ — 优先级最低
+        break                                                # 条件③ — 优先级最低
 ```
 
 <div class="grid grid-cols-3 gap-3 mt-4 text-sm">
@@ -663,15 +663,15 @@ layout: default
 ```python {all|3|4-9|10-13}
 # decode 循环：从 running 逐条取出
 while self.running and len(scheduled_seqs) < self.max_num_seqs:
-    seq = self.running.popleft()              # ① FIFO 取 seq
+    seq = self.running.popleft()                            # ① FIFO 取 seq
     while not self.block_manager.can_append(seq):
         if self.running:
-            self.preempt(self.running.pop())  # ② 抢占队尾腾空间
+            self.preempt(self.running.pop())                # ② 抢占队尾腾空间
         else:
             self.preempt(seq)
             break
     else:
-        seq.num_scheduled_tokens = 1           # ③ 固定 1 token/step
+        seq.num_scheduled_tokens = 1                        # ③ 固定 1 token/step
         seq.is_prefill = False
         self.block_manager.may_append(seq)
         scheduled_seqs.append(seq)

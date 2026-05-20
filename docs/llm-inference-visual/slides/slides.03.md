@@ -746,6 +746,7 @@ flowchart TD
     C --> D["num_tokens = 总长度<br/>= prompt + 已生成 token"]
     D --> E["分配新 blocks<br/>从头重算所有 KV"]
     E --> F["prefill 完成后<br/>进入 running 继续 decode"]
+```
 
 </div>
 

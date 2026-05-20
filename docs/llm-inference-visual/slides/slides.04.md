@@ -113,6 +113,8 @@ layout: default
 
 # 2.1 KV Cache 池 ≈ 虚拟内存分页
 
+<div class="flex justify-center">
+
 ```mermaid {scale: 0.65}
 flowchart TD
     subgraph LOG["逻辑层 (每个 Sequence)"]
@@ -131,6 +133,8 @@ flowchart TD
     end
     LOG --> MAP --> PHYS
 ```
+
+</div>
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   两条 seq 的前 8 个 token 共享相同前缀 → 共享 Block 3 和 Block 7。BlockManager 通过引用计数追踪每个 block 被多少 seq 引用。
@@ -242,6 +246,8 @@ layout: default
 
 # Block 的完整生命周期
 
+<div class="flex justify-center">
+
 ```mermaid {scale: 0.6}
 stateDiagram-v2
     [*] --> Free: 初始化 (free_block_ids)
@@ -253,6 +259,8 @@ stateDiagram-v2
     Deallocating --> Free: ref_count == 0\n回到 free 池
     Deallocating --> Allocated: 仍有引用\nref_count > 0
 ```
+
+</div>
 
 <div class="mt-3 text-sm">
   <strong>两条核心规则</strong>：
@@ -623,6 +631,8 @@ seq_b = [1,2,3,4, 5,6,7,8]     → 前 7 个与 seq_a 相同，但第 8 个不�
 
 # 完整闭环：从分配到回写
 
+<div class="flex justify-center">
+
 ```mermaid {scale: 0.6}
 flowchart LR
     subgraph S1["Step 1: seq_a 首次进入"]
@@ -635,6 +645,8 @@ flowchart LR
     end
     S1 --> S2
 ```
+
+</div>
 
 <!-- 从分配 (can_allocate+allocate) 到回写 (hash_blocks) 的完整流程 mermaid 图 -->
 
@@ -678,6 +690,8 @@ def deallocate(self, seq: Sequence):
 
 # BlockManager 方法调用链总结
 
+<div class="flex justify-center">
+
 ```mermaid {scale: 0.55}
 flowchart TD
     subgraph SCHED["调度器 Scheduler"]
@@ -709,6 +723,8 @@ flowchart TD
     S9 --> B3
     S5 --> B5["may_append → _allocate_block"]
 ```
+
+</div>
 
 <div class="mt-2 grid grid-cols-2 gap-2 text-xs">
 <div class="bg-blue-500/10 p-2 rounded text-center">

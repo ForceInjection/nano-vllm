@@ -387,7 +387,7 @@ def can_allocate(self, seq: Sequence) -> int:
     <strong>④ hash_to_block_id</strong> 内容寻址——O(1) 查找
   </div>
   </div>
-  <div class="mt-2 p-2 bg-yellow-500/10 rounded">
+  <div class="mt-2 p-2 bg-yellow-500/10 border-l-3 border-yellow-500 rounded">
     <strong>⑤ break 条件</strong>：哈希未命中（全局字典不含该哈希）或哈希碰撞但 token_ids 不匹配。<br/>
     break 之后不再检查后面的 block——因为「链断了」，后续 block 即使内容匹配也应因前缀不同而不同，不应共享。
   </div>
@@ -410,12 +410,12 @@ def can_allocate(self, seq: Sequence) -> int:
 ```
 
 <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
-<div class="bg-green-500/10 p-3 rounded">
+<div class="bg-green-500/10 border-l-3 border-green-500 p-3 rounded">
   <strong>used_block_ids 检查</strong><br/>
   命中的 block 如果仍被使用（ref_count &gt; 0），原地共享，<code>num_new_blocks</code> 减 1。<br/>
   如果已被释放（从 used 移除但哈希映射还在），需要从 free 池<strong>重新取出</strong>给当前 seq——但 KV 数据不必重算。
 </div>
-<div class="bg-purple-500/10 p-3 rounded">
+<div class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded">
   <strong>返回 -1 的信号</strong><br/>
   调度器收到 -1 后会触发 preemption：选一条 seq 调用 <code>deallocate</code> 释放其 block 腾出空间，再重试 <code>can_allocate</code>。<br/>
   <code>num_new_blocks</code> 的两种减少途径：① 原地共享（减 1），② 哈希命中但不在 used 中（不减，但需重新取出使用）。
@@ -457,13 +457,13 @@ seq_b: [A,B,C,D, E,F,G,H, K,L,M,N]             (14 tokens → 4 blocks)
 ```
 
 <div v-click class="mt-3 grid grid-cols-2 gap-3 text-sm">
-<div class="bg-green-500/10 p-3 rounded">
+<div class="bg-green-500/10 border-l-3 border-green-500 p-3 rounded">
   <strong>分配结果</strong><br/>
   block_table = [block_0, block_1, new_block_0, new_block_1]<br/>
   block_0.ref_count=2, block_1.ref_count=2<br/>
   新分配 block 的 ref_count=1
 </div>
-<div class="bg-blue-500/10 p-3 rounded">
+<div class="bg-blue-500/10 border-l-3 border-blue-500 p-3 rounded">
   <strong>节省</strong><br/>
   相比从头分配 4 个新 block：<br/>
    • 节省 2 个 block 的显存（8×hidden KV 空间）<br/>
@@ -659,15 +659,15 @@ def deallocate(self, seq: Sequence):
 
 <div class="mt-3 text-sm">
 
-  <div v-click="1" class="p-3 bg-blue-500/10 rounded mb-2">
+  <div v-click="1" class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded mb-2">
     <strong>为什么逆序遍历 block_table？</strong><br/>
     越靠后的 block 共享可能性越低，逆序使 ref_count 更早归零。如果正序先处理共享 block（ref_count=2 → 1），不会触发回收，但逻辑同样正确。
   </div>
-  <div v-click="2" class="p-3 bg-blue-500/10 rounded mb-2">
+  <div v-click="2" class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded mb-2">
     <strong>ref_count == 0 才真正回收</strong><br/>
     <code>_deallocate_block</code> 把 block_id 从 used 移回 free 池。注意：<strong>不删除 hash_to_block_id</strong>——这是 prefix cache 持久化的关键：哈希索引还在，block 的物理内容仍在。
   </div>
-  <div v-click="3" class="p-3 bg-green-500/10 rounded">
+  <div v-click="3" class="p-3 bg-green-500/10 border-l-3 border-green-500 rounded">
     <strong>示例</strong>：共享 block 被两个 seq 引用（ref_count=2）。seq_a deallocate → ref_count=1（未释放）。seq_b deallocate → ref_count=0 → 回到 free 池。后续新 seq 如果哈希链匹配，仍可从 hash_to_block_id 找到它——block 的 KV cache 数据不需要重新计算。
   </div>
 </div>

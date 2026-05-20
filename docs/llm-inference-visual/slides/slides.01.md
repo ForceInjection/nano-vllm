@@ -878,7 +878,11 @@ def postprocess(self, seqs, token_ids, is_prefill):
 ```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  四个步骤：① <code>hash_blocks</code> 注册前缀缓存 ② 计数器累加 + 清零 ③ chunked prefill 未竟则 <code>continue</code>，否则 <code>append_token</code> ④ 完成判定：EOS 或 max_tokens → FINISHED + 回收资源。
+  四个步骤：① <code>hash_blocks</code> 注册前缀缓存 ② 计数器累加 + 清零 ③ chunked prefill 未竟则 <code>continue</code>，否则 <code>append_token</code> ④ 完成判定 → 回收资源。
+</div>
+
+<div v-click class="mt-2 p-2 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-xs">
+  💡 <strong>两种完成条件</strong>：<code>token_id == eos</code>（模型自己说「结束了」）或 <code>num_completion_tokens == max_tokens</code>（达到用户设定的上限）
 </div>
 
 <!--

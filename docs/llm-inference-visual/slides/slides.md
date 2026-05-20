@@ -3,7 +3,7 @@ theme: default
 title: nano-vllm 实战课程
 info: |
   ## nano-vllm 实战课程
-  从源码走读 LLM 推理引擎：调度、KV cache、注意力、Tensor Parallel、CUDA Graph。
+  源码拆解 LLM 推理引擎：调度、KV cache、注意力、Tensor Parallel、CUDA Graph。
 
   [GitHub](https://github.com/GeeeekExplorer/nano-vllm)
 drawings:
@@ -19,7 +19,7 @@ background: /background.svg
 ---
 
 # nano-vllm 实战课程
-## 从源码走读 LLM 推理引擎
+## 深入浅出 LLM 推理引擎
 
 调度 · KV Cache · 注意力 · Tensor Parallel · CUDA Graph
 
@@ -35,7 +35,7 @@ background: /background.svg
 </div>
 
 <div class="mt-8 text-sm opacity-50">
-约 260 页 · 74 处源码引用 · 26 道自测题
+2026 · Grissom · AI 原力注入
 </div>
 
 ---

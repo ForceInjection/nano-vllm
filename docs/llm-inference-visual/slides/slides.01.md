@@ -7,7 +7,7 @@ background: /background.svg
 <h2 class="text-2xl mt-4 font-normal opacity-80">从 LLM.generate 走到 step 循环</h2>
 
 <div class="mt-12 text-sm opacity-60">
-nano-vllm 实战课程 · 从源码走读 LLM 推理引擎
+nano-vllm 实战课程 · 源码拆解 LLM 推理引擎
 </div>
 
 <!--
@@ -25,15 +25,15 @@ layout: default
 一个从零构建的轻量级 vLLM 实现，用于学习 LLM 推理引擎的内部原理。
 
 <div class="grid grid-cols-3 gap-4 mt-8">
-<div class="bg-blue-500/10 p-4 rounded">
+<div class="bg-blue-500/10 p-4 rounded border-l-3 border-blue-500">
   <div class="text-2xl font-bold text-blue-400 mb-2">~1,400 行</div>
   <div class="text-sm opacity-80">纯 Python 代码，结构清晰，可读性强</div>
 </div>
-<div class="bg-green-500/10 p-4 rounded">
+<div class="bg-green-500/10 p-4 rounded border-l-3 border-green-500">
   <div class="text-2xl font-bold text-green-400 mb-2">vLLM 同级</div>
   <div class="text-sm opacity-80">推理速度与 vLLM 相当（RTX 4070: 1434 tok/s）</div>
 </div>
-<div class="bg-purple-500/10 p-4 rounded">
+<div class="bg-purple-500/10 p-4 rounded border-l-3 border-purple-500">
   <div class="text-2xl font-bold text-purple-400 mb-2">8 课走读</div>
   <div class="text-sm opacity-80">从 generate 到 CUDA Graph，逐步展开</div>
 </div>
@@ -393,7 +393,7 @@ flowchart LR
     E --> F{is_prefill?}
     F -- Yes --> G["prefill batch<br/>(Sequence list)"]
     F -- No --> H["decode batch<br/>(Sequence list)"]
-    G --> I["ModelRunner.run"]
+    G --> I["ModelRunner.call('run')"]
     H --> I
     I --> J["Sampler returns token_ids"]
     J --> K["Scheduler.postprocess"]
@@ -462,20 +462,19 @@ layout: default
 ```python {all|4-6|7-13|14-16}
 def generate(self, prompts, sampling_params):
     # 1. 入队：把每个 prompt → tokenize → Sequence → waiting
-    for prompt in prompts:
-        self.add_request(prompt, sampling_params)
+    for prompt, sp in zip(prompts, sampling_params):
+        self.add_request(prompt, sp)
 
     # 2. 循环 step，直到所有 seq 完成
-    outputs = []
-    while not self.scheduler.is_finished():
-        step_outputs, num_tokens = self.step()
-        for seq_id, completion in step_outputs:
-            if completion:
-                outputs.append(...)
+    outputs = {}
+    while not self.is_finished():
+        output, num_tokens = self.step()
+        for seq_id, token_ids in output:
+            outputs[seq_id] = token_ids
 
     # 3. detokenize 返回文本
-    return [{"text": tokenizer.decode(out.token_ids),
-             "token_ids": out.token_ids} for out in outputs]
+    return [{"text": self.tokenizer.decode(tids),
+             "token_ids": tids} for tids in outputs.values()]
 ```
 
 <div v-click class="mt-2 text-xs opacity-60">
@@ -723,6 +722,8 @@ Prefill 不是无限并发的，有一个 token 预算上限：
 
 <div class="mt-4">
 
+<SourceCode file="nanovllm/config.py" lines="7-8" />
+
 ```python
 # Config 中的默认值
 max_num_batched_tokens: int = 16384  # 每轮 prefill 最多处理 16384 个 token
@@ -772,8 +773,8 @@ while self.running and len(scheduled_seqs) < self.max_num_seqs:
         seq.is_prefill = False
         self.block_manager.may_append(seq)   # block 满了就追加新的
         scheduled_seqs.append(seq)
-    assert scheduled_seqs                     # 至少调度一条
-    self.running.extendleft(reversed(scheduled_seqs))  # 未选中的放回
+    assert scheduled_seqs                                  # 至少调度一条
+    self.running.extendleft(reversed(scheduled_seqs))      # 未选中的放回 queue
     return scheduled_seqs, False
 ```
 
@@ -858,18 +859,18 @@ num_tokens = (sum(seq.num_scheduled_tokens for seq in seqs)
 
 # generate 循环中的吞吐统计（L76-L79）
 if num_tokens > 0:
-    prefill_ts += num_tokens    # Prefill: 计入 prefill 吞吐
+    prefill_throughput = num_tokens / (perf_counter() - t)  # Prefill tok/s
 else:
-    decode_ts += -num_tokens    # Decode: 计入 decode 吞吐
+    decode_throughput = -num_tokens / (perf_counter() - t)  # Decode tok/s
 ```
 
 <div v-click class="mt-4 grid grid-cols-2 gap-4 text-sm">
-<div class="bg-blue-500/10 p-3 rounded">
+<div class="bg-blue-500/10 p-3 rounded border-l-3 border-blue-500">
   <strong>num_tokens > 0 → Prefill</strong><br/>
   = Σ(num_scheduled_tokens)<br/>
   多个 seq，每个可能处理多个 token
 </div>
-<div class="bg-purple-500/10 p-3 rounded">
+<div class="bg-purple-500/10 p-3 rounded border-l-3 border-purple-500">
   <strong>num_tokens < 0 → Decode</strong><br/>
   = -len(seqs)<br/>
   每个 seq 固定 +1 token，所以就是 batch size
@@ -920,10 +921,10 @@ L01 练习：从 LLM.generate 走到 step 循环
 ```
 
 <div class="mt-4 grid grid-cols-5 gap-2 text-xs text-center">
-<div class="bg-blue-500/10 p-2 rounded">§1<br/><strong>LLM 别名验证</strong></div>
-<div class="bg-green-500/10 p-2 rounded">§2<br/><strong>add_request<br/>内部流程</strong></div>
-<div class="bg-purple-500/10 p-2 rounded">§3<br/><strong>step 三段式</strong></div>
-<div class="bg-yellow-500/10 p-2 rounded">§4<br/><strong>generate<br/>输出结构</strong></div>
+<div class="bg-blue-500/10 p-2 rounded border-l-3 border-blue-500">§1<br/><strong>LLM 别名验证</strong></div>
+<div class="bg-green-500/10 p-2 rounded border-l-3 border-green-500">§2<br/><strong>add_request<br/>内部流程</strong></div>
+<div class="bg-purple-500/10 p-2 rounded border-l-3 border-purple-500">§3<br/><strong>step 三段式</strong></div>
+<div class="bg-yellow-500/10 p-2 rounded border-l-3 border-yellow-500">§4<br/><strong>generate<br/>输出结构</strong></div>
 <div class="bg-red-500/10 p-2 rounded">§5<br/><strong>prefill/decode<br/>吞吐统计</strong></div>
 </div>
 
@@ -1009,12 +1010,12 @@ while not self.scheduler.is_finished():
 ```
 
 <div class="mt-4 grid grid-cols-2 gap-4 text-sm">
-<div class="bg-blue-500/10 p-3 rounded">
+<div class="bg-blue-500/10 p-3 rounded border-l-3 border-blue-500">
   <strong>Prefill 吞吐 =</strong><br/>
   Σ(num_scheduled_tokens) / Δt<br/>
   <span class="opacity-60">一次处理多个 token，吞吐高</span>
 </div>
-<div class="bg-purple-500/10 p-3 rounded">
+<div class="bg-purple-500/10 p-3 rounded border-l-3 border-purple-500">
   <strong>Decode 吞吐 =</strong><br/>
   len(seqs) / Δt<br/>
   <span class="opacity-60">每条 seq 只产出 1 token，吞吐低</span>
@@ -1137,10 +1138,10 @@ layout: center
 </div>
 
 <div class="mt-4 grid grid-cols-4 gap-3 text-sm max-w-2xl mx-auto">
-  <div class="bg-blue-500/10 p-3 rounded">✅ 端到端流程</div>
-  <div class="bg-green-500/10 p-3 rounded">✅ Prefill vs Decode</div>
-  <div class="bg-purple-500/10 p-3 rounded">✅ 调度→执行→回写</div>
-  <div class="bg-yellow-500/10 p-3 rounded">✅ L01 脚本验证</div>
+  <div class="bg-blue-500/10 p-3 rounded border-l-3 border-blue-500">✅ 端到端流程</div>
+  <div class="bg-green-500/10 p-3 rounded border-l-3 border-green-500">✅ Prefill vs Decode</div>
+  <div class="bg-purple-500/10 p-3 rounded border-l-3 border-purple-500">✅ 调度→执行→回写</div>
+  <div class="bg-yellow-500/10 p-3 rounded border-l-3 border-yellow-500">✅ L01 脚本验证</div>
 </div>
 
 <div class="mt-10">

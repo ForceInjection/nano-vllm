@@ -7,7 +7,7 @@ background: /background.svg
 <h2 class="text-2xl mt-4 font-normal opacity-80">Scheduler 的队列、Chunked Prefill 与 Preempt</h2>
 
 <div class="mt-12 text-sm opacity-60">
-nano-vllm 实战课程 · 从源码走读 LLM 推理引擎
+nano-vllm 实战课程 · 源码拆解 LLM 推理引擎
 </div>
 
 ---

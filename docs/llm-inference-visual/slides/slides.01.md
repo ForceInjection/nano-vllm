@@ -477,7 +477,7 @@ def generate(self, prompts, sampling_params):
              "token_ids": tids} for tids in outputs.values()]
 ```
 
-<div v-click class="mt-2 text-xs opacity-60">
+<div v-click class="mt-2 p-2 bg-green-500/10 border-l-3 border-green-500 rounded-r text-xs">
   数据形态：输入 <code>prompts: list[str]</code> → 中间 <code>Sequence</code> → 输出 <code>list[{"text": str, "token_ids": list[int]}]</code>
 </div>
 
@@ -508,7 +508,7 @@ def add_request(self, prompt, sampling_params):
 
 <div class="mt-4 grid grid-cols-3 gap-3 text-sm">
 <div v-click="1" class="bg-blue-500/10 p-3 rounded text-center">
-  <div class="font-bold mb-1">① Tokenize</div>
+  <div class="text-lg font-bold mb-1">① Tokenize</div>
   <div class="opacity-70">字符串 → token_ids</div>
   <div class="opacity-50 text-xs mt-1">tokenizer.encode("你好")<br/>→ [108386]</div>
 </div>
@@ -578,7 +578,7 @@ layout: default
 
 把三段式展开为数据流图，看清每一段的输入输出：
 
-```mermaid {scale: 0.7}
+```mermaid {scale: 0.68}
 flowchart LR
     subgraph SCHED["① schedule()"]
         A["waiting / running"] --> B["选择 seqs"]
@@ -877,7 +877,7 @@ else:
 </div>
 </div>
 
-<div v-click class="mt-3 text-xs opacity-60">
+<div v-click class="mt-3 p-2 bg-green-500/10 border-l-3 border-green-500 rounded-r text-xs">
   💡 这就是进度条上 <code>Prefill: 1234 tok/s</code> 和 <code>Decode: 56 tok/s</code> 分开显示的原理。两者的吞吐量级差异很大（prefill 一次处理多个 token，decode 逐 token 串行）。
 </div>
 

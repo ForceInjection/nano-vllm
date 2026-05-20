@@ -287,7 +287,7 @@ class Sequence:
         self.ignore_eos = sampling_params.ignore_eos
 ```
 
-<div v-click class="mt-2 text-xs opacity-60">
+<div v-click class="mt-2 p-2 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-xs">
   注意：<code>block_size</code> 是<strong>类变量</strong>（默认 256），所有 Sequence 共享；<code>sampling_params</code> 被解构为独立字段存储。
 </div>
 

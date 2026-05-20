@@ -397,20 +397,20 @@ layout: default
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="44-56" />
 
-```python {all|2-3|4|5-8|10-13}
+```python {all|2-3|4|5-10|12-13}
 # 条件通过后，执行调度动作
     if not seq.block_table:
-        self.block_manager.allocate(seq, n)     # ① 分配 KV block
-    seq.num_scheduled_tokens = min(num_tokens, remaining)  # ② 设定 token 数
+        self.block_manager.allocate(seq, n)                              # ① 分配 KV block
+    seq.num_scheduled_tokens = min(num_tokens, remaining)                # ② 设定 token 数
     num_batched_tokens += seq.num_scheduled_tokens
     if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:
-        seq.status = SequenceStatus.RUNNING     # ③ WAITING → RUNNING
+        seq.status = SequenceStatus.RUNNING                              # ③ WAITING → RUNNING
         self.waiting.popleft()
         self.running.append(seq)
     scheduled_seqs.append(seq)
 
 if scheduled_seqs:
-    return scheduled_seqs, True                 # ④ 本轮走 prefill
+    return scheduled_seqs, True                                          # ④ 本轮走 prefill
 ```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">

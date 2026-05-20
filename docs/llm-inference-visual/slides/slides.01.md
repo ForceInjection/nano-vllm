@@ -278,11 +278,11 @@ layout: default
 
 ```python
 def add_request(self, prompt, sampling_params):
-    # 第一步：tokenize — 把字符串变成整数列表
-    token_ids = (prompt if isinstance(prompt, list)
-                 else self.tokenizer.encode(prompt))
+    # 第一步：tokenize — 字符串 → 整数列表
+    if isinstance(prompt, str):
+        prompt = self.tokenizer.encode(prompt)
 
-    seq = Sequence(token_ids=token_ids, sampling_params=sampling_params)
+    seq = Sequence(prompt, sampling_params)
     self.scheduler.add(seq)
 ```
 
@@ -496,11 +496,11 @@ layout: default
 ```python
 def add_request(self, prompt, sampling_params):
     # 第一步：tokenize — 字符串 → 整数列表
-    token_ids = (prompt if isinstance(prompt, list)
-                 else self.tokenizer.encode(prompt))
+    if isinstance(prompt, str):
+        prompt = self.tokenizer.encode(prompt)
 
     # 第二步：包装成 Sequence（请求的「档案袋」）
-    seq = Sequence(token_ids=token_ids, sampling_params=sampling_params)
+    seq = Sequence(prompt, sampling_params)
 
     # 第三步：推入调度器的 waiting 队列
     self.scheduler.add(seq)
@@ -539,7 +539,7 @@ layout: default
 ```python {all|2-3|4|5-7}
 def step(self):
     seqs, is_prefill = self.scheduler.schedule()     # ① 调度
-    num_tokens = sum(...) if is_prefill else -len(seqs)
+    num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
     token_ids = self.model_runner.call("run", seqs, is_prefill)  # ② 执行
     self.scheduler.postprocess(seqs, token_ids, is_prefill)      # ③ 回写
     outputs = [(seq.seq_id, seq.completion_token_ids)
@@ -574,7 +574,7 @@ step 是本课最重要的函数。强调三段式：schedule（调度）→ run
 layout: default
 ---
 
-# 3.3 三段式的数据流
+# 三段式的数据流
 
 把三段式展开为数据流图，看清每一段的输入输出：
 
@@ -613,7 +613,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="29-55" />
 
-```python {all|3|5-6|7-9|12-13}
+```python {all|3|5-6|7-9|12-13|14-16|17-21|23-24}
 # Scheduler.schedule 中的 prefill 循环
 while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
     seq = self.waiting[0]                         # 从 waiting 头部取
@@ -629,10 +629,22 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
         num_tokens = seq.num_tokens - seq.num_cached_tokens
     if remaining < num_tokens and scheduled_seqs:  # 只允许第一条 chunk
         break
+    if not seq.block_table:                        # 执行分配动作
+        self.block_manager.allocate(seq, num_cached_blocks)
+    seq.num_scheduled_tokens = min(num_tokens, remaining)
+    num_batched_tokens += seq.num_scheduled_tokens
+    if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:
+        seq.status = SequenceStatus.RUNNING        # prefill 完成，进入 running
+        self.waiting.popleft()
+        self.running.append(seq)
+    scheduled_seqs.append(seq)
+
+if scheduled_seqs:
+    return scheduled_seqs, True                    # 本轮走 prefill
 ```
 
 <div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  🔑 <strong>三个关键概念</strong>：Chunked Prefill、前缀缓存命中、token 预算。下面逐一展开。
+  🔑 <strong>上半段</strong>判断条件（Chunked Prefill、前缀缓存、token 预算），<strong>下半段</strong>执行动作（allocate、设定 num_scheduled_tokens、状态转换、return）。下面逐一展开三个关键概念。
 </div>
 
 <!--
@@ -722,7 +734,7 @@ Prefill 不是无限并发的，有一个 token 预算上限：
 
 <div class="mt-4">
 
-<SourceCode file="nanovllm/config.py" lines="7-8" />
+<SourceCode file="nanovllm/config.py" lines="9-10" />
 
 ```python
 # Config 中的默认值
@@ -758,7 +770,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="57-73" />
 
-```python {all|3|4-9|10-13}
+```python {all|3|4-9|10-13|14-16}
 # Scheduler.schedule 中的 decode 循环
 while self.running and len(scheduled_seqs) < self.max_num_seqs:
     seq = self.running.popleft()            # FIFO 取出
@@ -773,9 +785,9 @@ while self.running and len(scheduled_seqs) < self.max_num_seqs:
         seq.is_prefill = False
         self.block_manager.may_append(seq)   # block 满了就追加新的
         scheduled_seqs.append(seq)
-    assert scheduled_seqs                                  # 至少调度一条
-    self.running.extendleft(reversed(scheduled_seqs))      # 未选中的放回 queue
-    return scheduled_seqs, False
+assert scheduled_seqs                        # 至少调度一条
+self.running.extendleft(reversed(scheduled_seqs))  # 未选中的放回队首
+return scheduled_seqs, False
 ```
 
 <!--
@@ -950,7 +962,7 @@ llm = LLM(model_path, enforce_eager=True, tensor_parallel_size=1)
 prompt = "Hello, nano-vllm!"
 token_ids = llm.tokenizer.encode(prompt)
 print(f"tokenizer.encode('{prompt}') → {token_ids}")
-# 输出: [9707, 11, 2037, 45, 12, 5794, 0]  ← 对应 Hello , nano - vllm !
+# 输出: [9707, 11, 2037, 45, 12, 5794, 0]  ← Hello , nano - vllm ! + 结束符
 ```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">

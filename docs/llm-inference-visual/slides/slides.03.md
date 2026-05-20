@@ -49,7 +49,7 @@ layout: default
 
 </div>
 
-<div v-click class="mt-4 text-sm opacity-80">
+<div v-click class="mt-4 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
   L02 拆解了 Sequence 字段。L03 打开 step 循环中的核心决策者——<strong>Scheduler</strong>：它在每个 step 决定跑哪些请求、跑多少 token。
 </div>
 
@@ -302,8 +302,8 @@ layout: default
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.55}
-flowchart TD
+```mermaid {scale: 0.3}
+flowchart LR
     Start["Scheduler.schedule()"] --> PF{"waiting 非空<br/>且 batch 有容量"}
     PF -- Yes --> PF1["取 waiting[0]"]
     PF1 --> PF2{"remaining < num_tokens<br/>且 scheduled 非空"}

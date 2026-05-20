@@ -259,8 +259,8 @@ stateDiagram-v2
 
 </div>
 
-<div class="mt-3 grid grid-cols-2 gap-4 text-sm">
-<div class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
+<div class="mt-3 grid grid-cols-2 gap-4 text-xs">
+<div v-click class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
   <strong>两条核心规则</strong>
   <ul class="mt-1 space-y-1">
     <li><strong>共享不复制</strong>：ref_count 递增时不做 KV 数据拷贝——指针语义</li>
@@ -325,7 +325,7 @@ h2 = BlockManager.compute_hash([9,10,11,12], prefix=h1)
 # 如果 block2 内容不同 → h2 必然不同 → 不命中，链中断
 ```
 
-<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-xs">
   <strong>链式 vs 独立哈希</strong>：如果每个 block 独立哈希（不考虑前缀），那么内容为 [9,10,11,12] 的 block 无论在位置 0 还是位置 2 哈希值都一样。<br/>
   链式保证 <strong>位置语义</strong>：同一个内容出现在不同位置 → 前缀不同 → 哈希值不同。这是 prefix cache 正确性的关键——只有「从头开始的连续前缀」才能命中。
 </div>
@@ -356,6 +356,10 @@ def can_allocate(self, seq: Sequence) -> int:
         return -1
     return num_cached_blocks
 ```
+
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  逐块计算链式哈希查 <code>hash_to_block_id</code>，命中后经 <code>token_ids</code> 全等校验才计数。链中断则 <code>break</code>，后续不再检查。返回命中块数，或 -1 表示空闲不够需 preempt。
+</div>
 
 <!-- 对应 block_manager.py L58-73，can_allocate 逐块检查前缀命中 -->
 

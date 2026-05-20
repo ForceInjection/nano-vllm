@@ -636,7 +636,7 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
 ```
 
 <div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  🔑 三个退出条件对应三个关键概念：<strong>Chunked Prefill</strong>、<strong>前缀缓存</strong>、<strong>token 预算</strong>。条件通过后，下一页看执行动作。下面逐一展开。
+  🔑 三个退出条件对应三个关键概念：<strong>Chunked Prefill</strong>、<strong>前缀缓存</strong>、<strong>token 预算</strong>。条件通过后，开始执行。
 </div>
 
 <!--
@@ -651,7 +651,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="44-55" />
 
-```python {all|2-3|4|5-8|10-11}
+```python {all|2-3|4|6-9|12-13}
 # 上半段条件全部通过后，执行调度动作
     if not seq.block_table:
         self.block_manager.allocate(seq, num_cached_blocks)  # ① 分配 KV block

@@ -77,7 +77,7 @@ Sequence 是每个请求的"身份证"，承载推理请求的全部状态。
 
 
 <!--
-课时安排。概念回顾 10min 用 OS 进程三态类比引入；代码走读 40min 覆盖字段分组、计数器和 block_table；脚本演示+练习 15min。
+课时安排。概念回顾 10min 用 OS 进程三态类比引入；代码走读 40min 覆盖字段分组、计数器和 block_table；脚本演示 10min + 动手练习 15min。
 -->
 
 ---
@@ -140,11 +140,12 @@ layout: default
   </ul>
 </div>
 <div class="bg-green-500/10 p-4 rounded border-l-3 border-green-500">
-  <div class="text-lg font-bold text-green-400 mb-2">⏱ 调度计数器</div>
+  <div class="text-lg font-bold text-green-400 mb-2">⏱ 调度与状态</div>
   <ul class="space-y-1">
     <li><code>num_cached_tokens</code> — 已完成的 token</li>
     <li><code>num_scheduled_tokens</code> — 本轮要算的</li>
     <li><code>num_tokens</code> — 总 token 数（动态增长）</li>
+    <li><code>status</code> — WAITING/RUNNING/FINISHED</li>
   </ul>
 </div>
 <div class="bg-purple-500/10 p-4 rounded border-l-3 border-purple-500">
@@ -152,7 +153,6 @@ layout: default
   <ul class="space-y-1">
     <li><code>block_table</code> — 逻辑→物理 block 映射</li>
     <li><code>block_size</code> — 每个 block 的 token 容量</li>
-    <li><code>status</code> — WAITING/RUNNING/FINISHED</li>
   </ul>
 </div>
 </div>
@@ -271,6 +271,7 @@ layout: default
 ```python
 class Sequence:
     block_size = 256
+    counter = count()
 
     def __init__(self, token_ids, sampling_params):
         self.seq_id = next(Sequence.counter)
@@ -420,7 +421,7 @@ layout: default
 
 # 3.3 计数器在 postprocess 中的更新时机
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="81-87" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="81-92" />
 
 ```python
 def postprocess(self, seqs, token_ids, is_prefill):
@@ -431,10 +432,15 @@ def postprocess(self, seqs, token_ids, is_prefill):
         if is_prefill and seq.num_cached_tokens < seq.num_tokens:
             continue                                       # ③ chunked-prefill 未竟
         seq.append_token(token_id)                         # ④ 追加采样 token
+        if (not seq.ignore_eos and token_id == self.eos) \
+           or seq.num_completion_tokens == seq.max_tokens:
+            seq.status = SequenceStatus.FINISHED            # ⑤ 完成判定
+            self.block_manager.deallocate(seq)              # ⑥ 回收 KV blocks
+            self.running.remove(seq)                        # ⑦ 移出运行队列
 ```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>生命周期</strong>：<code>schedule()</code> 设定 → <code>run()</code> 不变 → <code>postprocess()</code> 累加到 cached 然后清零。下一轮 <code>schedule()</code> 从 <code>num_cached_tokens</code> 开始取下一段。
+  <strong>生命周期</strong>：<code>schedule()</code> 设定 → <code>run()</code> 不变 → <code>postprocess()</code> 累加计数器＋完成判定＋资源回收。两种完成条件：EOS 或达到 max_tokens。
 </div>
 
 
@@ -448,7 +454,7 @@ layout: default
 
 # 3.4 block_table 与 block 分割公式
 
-<SourceCode file="nanovllm/engine/sequence.py" lines="55-62" />
+<SourceCode file="nanovllm/engine/sequence.py" lines="55-65" />
 
 ```python
 @property
@@ -595,11 +601,16 @@ class Config:
   💡 <strong>为什么必须是 256 的倍数？</strong> FlashAttention 的 Triton kernel 以 256 为 tile 大小读写 KV cache。block_size 对齐到这个 tile 可以避免跨 tile 的额外处理。
 </div>
 
+
+<!--
+block_size 的来源链：Config.kvcache_block_size → LLMEngine → Sequence.block_size(类变量)。必须是 256 的倍数——与 FlashAttention Triton kernel tile 大小对齐。打开 config.py L6-L18。
+-->
+
 ---
 layout: default
 ---
 
-# 3.4 last_token property
+# 3.4 last_token 字段
 
 <SourceCode file="nanovllm/engine/sequence.py" lines="22-22" />
 
@@ -642,7 +653,7 @@ def append_token(self, token_id: int):
 
 
 <!--
-block_size 的来源链：Config.kvcache_block_size → LLMEngine → Sequence.block_size(类变量)。必须是 256 的倍数——与 FlashAttention Triton kernel tile 大小对齐。打开 config.py L6-L18。
+last_token 是实例字段(非 @property)，在 __init__ L22 初始化，在 append_token L69 更新。对比 prefill 和 decode 两个阶段的数据需求差异。对照 sequence.py L22 和 L69。
 -->
 
 ---
@@ -676,7 +687,7 @@ def __setstate__(self, state):
 
 
 <!--
-last_token 是实例字段(非 @property)，在 __init__ L22 初始化，在 append_token L69 更新。对比 prefill 和 decode 两个阶段的数据需求差异。对照 sequence.py L22 和 L69。
+__getstate__/__setstate__ 使 Sequence 可在多进程中 pickle 传输。核心优化：is_prefill=True 时序列化完整 token_ids，False 时只序列化 last_token。打开 sequence.py L72-L83。
 -->
 
 ---
@@ -769,7 +780,7 @@ layout: default
 
 
 <!--
-status 和 is_prefill 的联动变化表。重点：is_prefill 不由 status 推导，preempt 时需显式设置 is_prefill = True。合并两个紫色框，提炼联动规则 + 关键例外。
+status 和 is_prefill 的联动变化表。重点观察 preempt 行：status 虽回 WAITING，但 is_prefill 显式置 True——两者不由同一个条件推导。对照 scheduler.py L75-L79。
 -->
 
 ---
@@ -781,7 +792,7 @@ layout: section
 
 
 <!--
-本页用表格展示 status 和 is_prefill 在整个生命周期中的联动变化。重点观察 preempt 行：status 虽回 WAITING，但 is_prefill 显式置 True。对照 scheduler.py L75-L79。翻下一页继续。
+进入第四节——通过 L02_sequence.py 脚本验证前面所学的 Sequence 概念。4 个 Section 覆盖字段分类、Block 公式、append_token 和 Pickle 序列化。纯 CPU 可运行。
 -->
 
 ---
@@ -790,19 +801,20 @@ layout: default
 
 # L02_sequence.py：4 个验证 section
 
-<SourceCode file="docs/llm-inference-visual/scripts/L02_sequence.py" lines="1-13" />
+<SourceCode file="docs/llm-inference-visual/scripts/L02_sequence.py" lines="2-13" />
 
 ```python
 """
 L02 练习：Sequence 数据结构与请求生命周期
 
 验证要点：
-- Sequence 三大类字段（token、调度计数器、KV cache 映射）
-- block 分割公式：num_blocks = ⌈num_tokens / block_size⌉
-- append_token 更新 completion_token_ids
-- pickle 序列化：prefill 发 token_ids，decode 发 last_token
+- num_blocks = (num_tokens + block_size - 1) // block_size
+- last_block_num_tokens = num_tokens - (num_blocks - 1) * block_size
+- block(i) 返回第 i 个 block 的 token_ids 切片
+- pickle 协议: prefill 传全量 token_ids, decode 只传 last_token
 
-依赖：仅 CPU（nano-vllm 包），不需要模型权重
+依赖：nano-vllm 包（仅需 CPU）
+用法：python L02_sequence.py
 """
 ```
 
@@ -815,7 +827,7 @@ L02 练习：Sequence 数据结构与请求生命周期
 
 
 <!--
-续页。从上一页状态转换表看到 is_prefill 随阶段变化——本页解释为什么这样设计。关键结论：is_prefill 不是由 status 推导的，preempt 时需显式设置。
+4 个验证 Section 概览。§1 字段分类、§2 Block 公式验证、§3 append_token 更新逻辑、§4 Pickle 序列化两种模式。建议逐 section 运行并观察输出。
 -->
 
 ---
@@ -827,7 +839,7 @@ layout: default
 ```python
 from nanovllm.engine.sequence import Sequence
 
-seq = Sequence([1, 2, 3], sampling_params=None)
+seq = Sequence([1, 2, 3])
 
 # token 数据
 print("token_ids:", seq.token_ids)                # [1, 2, 3]
@@ -864,7 +876,7 @@ layout: default
 Sequence.block_size = 4  # 设为 4 方便手算
 
 for n in [1, 4, 5, 8, 9]:
-    seq = Sequence(list(range(n)), sampling_params=None)
+    seq = Sequence(list(range(n)))
     print(f"n={n}: num_blocks={seq.num_blocks}, "
           f"last_block_num_tokens={seq.last_block_num_tokens}")
     for i in range(seq.num_blocks):
@@ -910,7 +922,7 @@ assert seq2.token_ids == []               # 空！
 
 
 <!--
-运行 §1 部分打印 Sequence 实例的所有字段。演示创建 Sequence([1,2,3]) 后输出三大类字段初始值，与 2.1 节三类卡片对应。
+§3 演示 append_token 更新逻辑（completion_token_ids 增长、num_prompt_tokens 不变）；§4 演示 Pickle 两种模式下反序列化结果差异（prefill 恢复完整 token_ids，decode token_ids 为空）。建议学员逐段运行验证。
 -->
 
 ---
@@ -967,7 +979,7 @@ from nanovllm.engine.sequence import Sequence
 Sequence.block_size = 4  # 设为 4 方便手算
 
 for n in [1, 4, 5, 8, 9]:
-    seq = Sequence(list(range(n)), sampling_params=None)
+    seq = Sequence(list(range(n)))
     print(f"n={n}: num_blocks={seq.num_blocks}, "
           f"last_block_num_tokens={seq.last_block_num_tokens}")
     for i in range(seq.num_blocks):
@@ -980,7 +992,7 @@ for n in [1, 4, 5, 8, 9]:
 
 
 <!--
-运行 §3-4 部分。§3 演示 append_token 效果(completion_token_ids 增长、num_prompt_tokens 不变)；§4 演示 Pickle 两种模式下反序列化结果差异。
+课堂练习：在 Python 交互环境中验证 block_size 与 num_blocks 的关系。验收重点：num_blocks 和 last_block_num_tokens 的计算公式。参考 02-sequence-lifecycle.md §4.1。
 -->
 
 ---
@@ -1005,7 +1017,7 @@ layout: default
 
 
 <!--
-总结 append_token 和 Pickle 序列化的数据流。两张表分别展示字段变化和传输模式差异。decode 只传 last_token 造成 token_ids 为空——被抢占后可通过重设 is_prefill 自动恢复。
+Q1-Q2 自测题。Q1 关注 block_size 作为类变量的问题和改进方案，Q2 关注 decode 序列化只传 last_token 的边界场景。建议课后讨论。
 -->
 
 ---
@@ -1023,7 +1035,7 @@ layout: default
 
 
 <!--
-课堂练习：在 Python 交互环境中验证 block_size 与 num_blocks 的关系。验收重点：num_blocks 和 last_block_num_tokens 的计算公式。参考 02-sequence-lifecycle.md §4.1。
+Q3 自测题。关注计数器更新逻辑放在 postprocess 还是 append_token 的设计选择——体现单一职责原则。可让学生先讨论再揭晓答案。
 -->
 
 ---
@@ -1048,9 +1060,5 @@ layout: center
 </div>
 
 <!--
-总结 L02 四个知识点：三大类字段（sequence.py L14-L32）、状态机（WAITING→RUNNING→FINISHED）、block 分割公式（L55-L62）、TP 序列化（L72-L83）。下一课进入 Scheduler 调度逻辑。
--->
-
-<!--
-结束页。总结本节课核心收获：Sequence 的三类字段、状态机转移、block 分割公式和 TP 序列化策略。预告下一课：Scheduler 的队列与抢占机制。
+结束页。总结 L02 四个核心收获：三大类字段（sequence.py L14-L32）、状态机（WAITING→RUNNING→FINISHED）、block 分割公式（L55-L62）、TP 序列化（L72-L83）。预告下一课：Scheduler 的队列与抢占机制。
 -->

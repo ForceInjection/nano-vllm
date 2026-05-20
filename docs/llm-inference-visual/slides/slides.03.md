@@ -458,7 +458,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="29-43" />
 
-```python {all|5-6|7-13|14-15}
+```python {all|5-6|9-10|14-15}
 # Scheduler.schedule 中的 prefill 循环
 while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
     seq = self.waiting[0]                                          # 从 waiting 头部看
@@ -467,8 +467,8 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
         break                                                      # ① token 预算耗尽
     if not seq.block_table:
         num_cached_blocks = self.block_manager.can_allocate(seq)
-        if num_cached_blocks == -1:
-            break                                                  # ② KV cache 不够
+        if num_cached_blocks == -1:                                # ② KV cache 不够
+            break                                                  
         num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
     else:
         num_tokens = seq.num_tokens - seq.num_cached_tokens
@@ -492,24 +492,24 @@ layout: default
 
 prefill 循环中有三个 <code>break</code>，它们的执行顺序决定批拼接行为：
 
-```python {all|5|7-9|10-16|17}
+```python {all|5-6|10-11|16-17}
 while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
     seq = self.waiting[0]
     remaining = self.max_num_batched_tokens - num_batched_tokens
 
-    if remaining == 0:                                       # 条件①
-        break                                                # 优先级最高
+    if remaining == 0:                                                       # 条件①
+        break                                                                # 优先级最高
 
     if not seq.block_table:
         num_cached_blocks = self.block_manager.can_allocate(seq)
         if num_cached_blocks == -1:                                          # 条件②
-            break                                            # 优先级次之
+            break                                                            # 优先级次之
         num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
     else:
         num_tokens = seq.num_tokens - seq.num_cached_tokens
 
     if remaining < num_tokens and scheduled_seqs:
-        break                                                # 条件③ — 优先级最低
+        break                                                                 # 条件③ — 优先级最低
 ```
 
 <div class="grid grid-cols-3 gap-3 mt-4 text-sm">

@@ -399,6 +399,9 @@ def can_allocate(self, seq: Sequence) -> int:
     <strong>⑤ break 条件</strong>：哈希未命中（全局字典不含该哈希）或哈希碰撞但 token_ids 不匹配。<br/>
     break 之后不再检查后面的 block——因为「链断了」，后续 block 即使内容匹配也应因前缀不同而不同，不应共享。
   </div>
+  <div class="mt-2 p-2 bg-green-500/10 border-l-3 border-green-500 rounded">
+    <strong>⑥ 命中计数</strong>：<code>num_cached_blocks += 1</code>。哈希命中且 token_ids 全等校验通过后，该 block 可被复用。累加器同时用于 <code>allocate</code> 的两种分配路径判断。
+  </div>
 </div>
 
 <!-- 对应 block_manager.py L58-67，链式遍历逻辑：计算哈希 → 查表 → 碰撞校验 → break -->
@@ -419,14 +422,14 @@ def can_allocate(self, seq: Sequence) -> int:
 
 <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
 <div class="bg-green-500/10 border-l-3 border-green-500 p-3 rounded">
-  <strong>used_block_ids 检查</strong><br/>
+  <strong>①② used_block_ids 检查</strong><br/>
   命中的 block 如果仍被使用（ref_count &gt; 0），原地共享，<code>num_new_blocks</code> 减 1。<br/>
   如果已被释放（从 used 移除但哈希映射还在），需要从 free 池<strong>重新取出</strong>给当前 seq——但 KV 数据不必重算。
 </div>
 <div class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded">
-  <strong>返回 -1 的信号</strong><br/>
-  调度器收到 -1 后会触发 preemption：选一条 seq 调用 <code>deallocate</code> 释放其 block 腾出空间，再重试 <code>can_allocate</code>。<br/>
-  <code>num_new_blocks</code> 的两种减少途径：① 原地共享（减 1），② 哈希命中但不在 used 中（不减，但需重新取出使用）。
+  <strong>③④ 返回 -1 与命中数</strong><br/>
+  ③ 空闲不够时返回 -1，调度器触发 preempt 腾空间后重试。<br/>
+  ④ 返回 <code>num_cached_blocks</code>——<code>allocate</code> 据此决定复用多少 block。
 </div>
 </div>
 

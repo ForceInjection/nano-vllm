@@ -55,7 +55,11 @@ layout: default
 
 # 本课在课程中的位置
 
-<div style="height: 50px;"></div>
+<div class="text-sm opacity-80 mt-2 mb-6">
+从用户调用 <code>LLM.generate("你好")</code> 开始，追踪代码经过 add_request → step 循环 → postprocess 的完整路径，直到拿到生成的回答——最终得到一张端到端流程图。
+</div>
+
+<div style="height: 30px;"></div>
 <div class="mt-4 text-sm max-w-2xl mx-auto">
 
 <div class="flex justify-center gap-1 mb-2">
@@ -94,7 +98,7 @@ layout: default
 </div>
 
 <!--
-L01-L04 是调度层（系统如何管理请求），L05-L08 是执行层（张量如何计算）。本课作为第一课，后续所有课程都建立在本课主干基础上，务必让学生理解三段式框架。
+§1 本课概述。课程路线图 + 一句话概述：从 LLM.generate 追踪代码经过 add_request → step 循环 → postprocess，最终得到端到端流程图。L01-L04 是调度层，L05-L08 是执行层。本课 L01 建立全局印象，后续课程都建立在本课主干基础上。
 -->
 
 ---

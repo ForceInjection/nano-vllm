@@ -21,7 +21,11 @@ layout: default
 
 # 本课在课程中的位置
 
-<div style="height: 50px;"></div>
+<div class="text-sm opacity-80 mt-2 mb-6">
+<code>Sequence</code> 是每个推理请求的"身份证"——承载 prompt 与生成 token，记录调度计数器与 KV cache 映射，其生命周期状态（WAITING/RUNNING/FINISHED）在调度器里不断变化。掌握 Sequence，后续课程的调度与 KV cache 管理都有了落点。
+</div>
+
+<div style="height: 30px;"></div>
 <div class="mt-4 text-sm max-w-2xl mx-auto">
 
 <div class="flex justify-center gap-1 mb-2">
@@ -56,7 +60,7 @@ layout: default
 
 
 <!--
-课程路线图。本课处于第 2 节——L01 建立全局印象后，打开 step 循环反复操作的核心对象 Sequence。后续 L03 调度器、L04 Block 管理都建立在 Sequence 之上。
+§1 本课概述。课程路线图 + 一句话概述：Sequence 是每个请求的"身份证"，承载三类信息（token 数据、调度计数器、KV cache 映射）。本课 L02，后续 L03/L04 建立在 Sequence 之上。
 -->
 
 ---

@@ -115,15 +115,13 @@ layout: default
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.40}
+```mermaid {scale: 0.45}
 flowchart TD
     subgraph LOG["逻辑层 (每个 Sequence)"]
-        T1["seq_a: t0..t3 | t4..t7 | t8..t9"]
-        T2["seq_b: t0..t3 | t4..t7 | t10..t13"]
+        T1["seq_a: t0..t3 | t4..t7 | t8..t9"] ~~~ T2["seq_b: t0..t3 | t4..t7 | t10..t13"]
     end
     subgraph MAP["block_table"]
-        BT1["seq_a: [3, 7, 2]"]
-        BT2["seq_b: [3, 7, 9]"]
+        BT1["seq_a: [3, 7, 2]"] ~~~ BT2["seq_b: [3, 7, 9]"]
     end
     subgraph PHYS["物理层 (显存 KV cache 池)"]
         B2["Block 2"]
@@ -243,12 +241,11 @@ class Block:
 layout: default
 ---
 
-
 # Block 的完整生命周期
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.6}
+```mermaid {scale: 0.5}
 stateDiagram-v2
     [*] --> Free: 初始化 (free_block_ids)
     Free --> Allocated: allocate 分配\nref_count = 1
@@ -262,16 +259,17 @@ stateDiagram-v2
 
 </div>
 
-<div class="mt-3 text-sm">
-  <strong>两条核心规则</strong>：
+<div class="mt-3 grid grid-cols-2 gap-4 text-sm">
+<div class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
+  <strong>两条核心规则</strong>
   <ul class="mt-1 space-y-1">
     <li><strong>共享不复制</strong>：ref_count 递增时不做 KV 数据拷贝——指针语义</li>
     <li><strong>延迟回收</strong>：block 只有 ref_count 归零后才回到 free 池——确保正在使用该 block 的 seq 不会读到被覆写的数据</li>
   </ul>
 </div>
-
-<div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
+<div v-click class="p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r">
   <strong>OS 类比</strong>：ref_count &gt; 1 的 block ≈ 多个进程的共享只读页面（mmap MAP_SHARED）。当所有进程都 unmap 后物理页面才释放。nano-vllm 的 <code>hash_to_block_id</code> 则相当于文件系统 inode——即使所有引用者都释放了 block，哈希索引仍保留，可以按内容重新找回。
+</div>
 </div>
 
 <!-- Block 状态转移图：Free → Allocated → Shared → Deallocating → Free -->

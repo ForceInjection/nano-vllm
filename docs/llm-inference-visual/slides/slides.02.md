@@ -203,7 +203,7 @@ layout: default
 | `RUNNING → WAITING` | `Scheduler.preempt()` | `scheduler.py:L75-L79` |
 | `RUNNING → FINISHED` | `postprocess()` 判定 EOS/max_tokens | `scheduler.py:L81-L92` |
 
-<div v-click class="mt-4 p-3 bg-gray-800/50 rounded text-sm">
+<div v-click class="mt-4 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   💡 <strong>关键</strong>：Sequence 本身不驱动状态转换——它只是状态容器。所有转换由 <code>Scheduler</code> 和 <code>BlockManager</code> 协同完成。
 </div>
 
@@ -370,12 +370,12 @@ def append_token(self, token_id: int):
 ```
 
 <div class="grid grid-cols-2 gap-4 mt-4 text-sm">
-<div v-click="1" class="bg-gray-800/50 p-3 rounded">
+<div v-click="1" class="bg-blue-500/10 p-3 rounded border-l-3 border-blue-500">
   <strong>num_prompt_tokens</strong><br/>
   初始化后<strong>永远不变</strong><br/>
   用于区分 prompt 和 completion
 </div>
-<div v-click="2" class="bg-gray-800/50 p-3 rounded">
+<div v-click="2" class="bg-purple-500/10 p-3 rounded border-l-3 border-purple-500">
   <strong>num_completion_tokens</strong><br/>
   <code>len(completion_token_ids)</code><br/>
   是 <code>@property</code>，返回 <code>num_tokens - num_prompt_tokens</code><br/>
@@ -579,7 +579,7 @@ class Config:
   <strong>传递链</strong>：<code>Config.kvcache_block_size</code> → <code>LLMEngine.__init__</code> → <code>Sequence.block_size</code>（类变量，所有 Sequence 共享）
 </div>
 
-<div class="mt-3 p-3 bg-gray-800/50 rounded text-sm">
+<div class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   💡 <strong>为什么必须是 256 的倍数？</strong> FlashAttention 的 Triton kernel 以 256 为 tile 大小读写 KV cache。block_size 对齐到这个 tile 可以避免跨 tile 的额外处理。
 </div>
 
@@ -776,7 +776,7 @@ layout: default
 | EOS / max_tokens | FINISHED | — | 推理结束 |
 </div>
 
-<div v-click="2" class="mt-4 p-3 bg-gray-800/50 rounded text-sm">
+<div v-click="2" class="mt-4 p-3 bg-purple-500/10 border-l-3 border-purple-500 rounded-r text-sm">
   <strong>联动逻辑</strong>：<code>is_prefill</code> 跟随 <code>num_cached_tokens &lt; num_tokens</code> 条件自动变化。当 <code>is_prefill = True</code> 时，<code>__getstate__</code> 序列化完整 token_ids；当 <code>is_prefill = False</code> 时，只序列化 last_token。
 </div>
 
@@ -862,7 +862,7 @@ print("block_table:", seq.block_table)            # []
 print("block_size:", seq.block_size)              # 256
 ```
 
-<div v-click class="mt-3 p-3 bg-gray-800/50 rounded text-sm">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   脚本执行后会打印以上所有字段，验证 2.1 节的三大分类。<code>token_ids</code> 保存完整 token 序列，其他字段均从它衍生。
 </div>
 

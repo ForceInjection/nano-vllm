@@ -458,7 +458,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="29-43" />
 
-```python {all|5-7|8-11|12-14}
+```python {all|5-6|7-11|12-15}
 # Scheduler.schedule 中的 prefill 循环
 while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
     seq = self.waiting[0]                                          # 从 waiting 头部看

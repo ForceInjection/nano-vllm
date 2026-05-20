@@ -47,7 +47,7 @@ layout: default
 
 </div>
 
-<div v-click class="mt-4 text-sm opacity-80">
+<div v-click class="mt-4 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
   L03 调度器调用 <code>can_allocate</code>、<code>may_append</code>、<code>deallocate</code>。L04 打开这些方法背后的管理器——<strong>BlockManager</strong>：显存分页 + 前缀缓存。
 </div>
 
@@ -132,7 +132,7 @@ flowchart TD
     LOG --> MAP --> PHYS
 ```
 
-<div v-click class="mt-3 text-sm opacity-80">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   两条 seq 的前 8 个 token 共享相同前缀 → 共享 Block 3 和 Block 7。BlockManager 通过引用计数追踪每个 block 被多少 seq 引用。
 </div>
 
@@ -814,7 +814,7 @@ print(f"链式哈希: h0={h0}, h1={h1}")
 #       seq_b.num_cached_tokens = 2 * 4 = 8
 ```
 
-<div v-click class="mt-3 text-sm opacity-80">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   📍 验收：最后一个不完整 block（[9,10]）不参与 hash——所以 seq_a 只登记 2 个 block，seq_b 的前两块可以命中。
 </div>
 
@@ -863,7 +863,7 @@ layout: center
 
 # 🎉 第 4 课完成
 
-<div class="mt-6 text-lg opacity-80">
+<div class="mt-6 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-lg">
   掌握了 BlockManager 的分页管理、引用计数与 Prefix Caching 闭环
 </div>
 

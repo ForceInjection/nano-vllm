@@ -660,7 +660,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="57-73" />
 
-```python {all|3|4-9|10-13}
+```python {all|3|4-9|10-14}
 # decode 循环：从 running 逐条取出
 while self.running and len(scheduled_seqs) < self.max_num_seqs:
     seq = self.running.popleft()                            # ① FIFO 取 seq

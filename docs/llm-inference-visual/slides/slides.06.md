@@ -7,7 +7,7 @@ background: /background.svg
 <h2 class="text-2xl mt-4 font-normal opacity-80">Decode 一步生成与 Block Tables</h2>
 
 <div class="mt-12 text-sm opacity-60">
-nano-vllm 实战课程 · 从源码走读 LLM 推理引擎
+nano-vllm 实战课程 · 源码拆解 LLM 推理引擎
 </div>
 
 ---
@@ -302,7 +302,7 @@ slot = seq.block_table[-1] * self.block_size + seq.last_block_num_tokens - 1
 <div class="text-sm mt-3">
 
 <div class="grid grid-cols-3 gap-3 mt-2">
-<div class="bg-gray-800/50 p-3 rounded">
+<div class="bg-gray-800/50 p-3 rounded text-gray-200">
 
 **场景 A：新 block 第 0 位**
 ```
@@ -315,7 +315,7 @@ slot = 7×256+1-1 = **1792**
 token 写在新 block 开头——256 的整数倍。
 
 </div>
-<div class="bg-gray-800/50 p-3 rounded">
+<div class="bg-gray-800/50 p-3 rounded text-gray-200">
 
 **场景 B：block 末尾**
 ```
@@ -328,7 +328,7 @@ slot = 7×256+256-1 = **2047**
 该 block 最后一个位置，下次触发 may_append！
 
 </div>
-<div class="bg-gray-800/50 p-3 rounded">
+<div class="bg-gray-800/50 p-3 rounded text-gray-200">
 
 **场景 C：block 中间**
 ```

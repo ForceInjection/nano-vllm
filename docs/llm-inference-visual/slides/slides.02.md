@@ -222,7 +222,7 @@ PagedAttention 的核心思想：将 KV cache 分页管理，类比操作系统�
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.55}
+```mermaid {scale: 0.7}
 flowchart TD
     subgraph LOGIC["逻辑层 (Sequence)"]
         T["token 序列: t0 t1 t2 t3 | t4 t5 t6 t7 | t8 t9"]
@@ -306,46 +306,30 @@ layout: default
 <SourceCode file="nanovllm/engine/sequence.py" lines="14-32" />
 
 ```python
-def __init__(self, token_ids, sampling_params, block_size=256, eos=-1):
-    # ── Token 数据 ──
-    self.token_ids = list(token_ids)              # ①
-    self.num_prompt_tokens = len(token_ids)       # ②
-    self.completion_token_ids: list[int] = []     # ③
+def __init__(self, token_ids, sampling_params):
+    self.token_ids = copy(token_ids)          # 保存完整 token 序列（浅拷贝）
+    self.last_token = token_ids[-1]           # 最后一个 token，decode 阶段使用
+    self.num_tokens = len(self.token_ids)     # 总 token 数，动态增长
+    self.num_prompt_tokens = len(token_ids)   # prompt 长度，初始化后永久不变
 
-    # ── 调度计数器 ──
-    self.status = SequenceStatus.WAITING          # ④
-    self.is_prefill = True                        # ⑤
-    self.num_cached_tokens = 0                    # ⑥
-    self.num_scheduled_tokens = 0                 # ⑦
+    self.status = SequenceStatus.WAITING      # WAITING / RUNNING / FINISHED 三态
+    self.is_prefill = True                    # 是否 prefill 阶段，决定序列化和调度
+    self.num_cached_tokens = 0                # 已写入 KV cache 的 token 数
+    self.num_scheduled_tokens = 0             # 本轮计划处理的 token 数
 
-    # ── KV Cache 映射 ──
-    self.block_table: list[int] = []              # ⑧
-    self.block_size = block_size                  # ⑨
-    self.sampling_params = sampling_params        # ⑩
+    self.block_table = []                     # 逻辑 block → 物理 block 映射数组
+    self.temperature = sampling_params.temperature
+    self.max_tokens = sampling_params.max_tokens
+    self.ignore_eos = sampling_params.ignore_eos
 ```
 
-<div v-click="1">
-<div class="grid grid-cols-2 gap-x-6 gap-y-2 text-sm mt-4">
-<div><span class="text-blue-400 font-bold">①</span> <code>token_ids</code> — prompt token 列表，推理中不断追加新 token</div>
-<div><span class="text-blue-400 font-bold">②</span> <code>num_prompt_tokens</code> — prompt 长度，初始化后永久不变</div>
-<div><span class="text-blue-400 font-bold">③</span> <code>completion_token_ids</code> — 生成 token 记录，仅用于统计和 max_tokens 判断</div>
-<div><span class="text-blue-400 font-bold">④</span> <code>status</code> — WAITING / RUNNING / FINISHED 三态</div>
-<div><span class="text-blue-400 font-bold">⑤</span> <code>is_prefill</code> — 是否为 prefill 阶段，影响序列化和调度策略</div>
-<div><span class="text-blue-400 font-bold">⑥</span> <code>num_cached_tokens</code> — 已写入 KV cache 的 token 数量</div>
-<div><span class="text-blue-400 font-bold">⑦</span> <code>num_scheduled_tokens</code> — 本轮计划处理的 token 数量</div>
-<div><span class="text-blue-400 font-bold">⑧</span> <code>block_table</code> — 逻辑 block 到物理 block 的映射数组</div>
-<div><span class="text-blue-400 font-bold">⑨</span> <code>block_size</code> — 每个 KV cache block 的大小（类变量，所有实例共享）</div>
-<div><span class="text-blue-400 font-bold">⑩</span> <code>sampling_params</code> — 采样参数（temperature、top_p、max_tokens 等）</div>
-</div>
-</div>
-
-<div v-click="2" class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
-  <strong>注意</strong>：以上字段覆盖了 Token 数据、调度计数器、KV Cache 映射三大类。<code>is_prefill</code> 最容易被忽略，但它是决定序列化和调度策略的枢纽。接下来逐一展开。
+<div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
+  <strong>注意</strong>：以上字段覆盖了 Token 数据、调度计数器、KV Cache 映射三大类。<code>is_prefill</code> 最容易被忽略，但它是决定序列化和调度策略的枢纽。
 </div>
 
 
 <!--
-逐字段注释初始化参数，按编号顺序讲解。特别强调 is_prefill——虽然只是布尔值，但决定了序列化和调度策略的分支。
+逐字段注释了初始化参数。特别强调 is_prefill——虽然只是布尔值，但决定了序列化和调度策略的分支。
 -->
 
 ---
@@ -534,7 +518,7 @@ last_block_num_tokens = 1000 - (4 - 1) * 256  # = 1000 - 768 = 232
 </div>
 
 <div v-click="2" class="mt-4 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>观察</strong>：前 3 个 block 各装满 256 个 token，最后一块只装 232 个。<code>last_block_num_tokens = num_tokens % block_size</code>（余数为 0 时等于 block_size）。
+  <strong>观察</strong>：前 3 个 block 各装满 256 个 token，最后一块只装 232 个。<code>last = num_tokens − (num_blocks − 1) × block_size</code>。
 </div>
 
 <div v-click="3" class="mt-3">

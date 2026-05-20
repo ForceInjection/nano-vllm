@@ -15,6 +15,10 @@
 table {
   font-size: 0.9rem;
 }
+thead th {
+  background: rgba(59, 130, 246, 0.18) !important;
+  font-weight: 600 !important;
+}
 
 /* 自测题过渡动画 */
 .selftest-enter-active,

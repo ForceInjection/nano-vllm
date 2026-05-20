@@ -126,7 +126,7 @@ layout: section
 layout: default
 ---
 
-# 2.1 Sequence = 请求的「档案袋」
+# Sequence = 请求的「档案袋」
 
 一个请求从进入引擎到返回结果，需要携带大量状态信息。Sequence 把这些信息打包在一起：
 
@@ -166,7 +166,7 @@ Sequence 的三类信息用三个彩色卡片呈现：蓝色 Token 数据、绿�
 layout: default
 ---
 
-# 2.2 状态机：WAITING → RUNNING → FINISHED
+# 2.1 状态机：WAITING → RUNNING → FINISHED
 
 ```mermaid {scale: 0.7}
 stateDiagram-v2
@@ -191,7 +191,7 @@ stateDiagram-v2
 layout: default
 ---
 
-# 状态转换由谁触发？
+# 2.1.1 状态转换由谁触发？
 
 每个状态转换都对应代码中的具体调用点：
 
@@ -216,7 +216,7 @@ layout: default
 layout: default
 ---
 
-# 2.3 block_table ≈ 虚拟内存页表
+# 2.2 block_table ≈ 虚拟内存页表
 
 PagedAttention 的核心思想：将 KV cache 分页管理，类比操作系统虚拟内存。
 
@@ -264,7 +264,7 @@ layout: section
 layout: default
 ---
 
-# 3.1 Sequence 字段全景
+# Sequence 字段全景
 
 <SourceCode file="nanovllm/engine/sequence.py" lines="14-32" />
 
@@ -337,7 +337,7 @@ def __init__(self, token_ids, sampling_params):
 layout: default
 ---
 
-# 3.2 Token 字段：prompt 与 completion 分离
+# 3.1 Token 字段：prompt 与 completion 分离
 
 <SourceCode file="nanovllm/engine/sequence.py" lines="14-23" />
 
@@ -378,7 +378,7 @@ prompt 与 completion 分离的设计：token_ids 保存完整序列，completio
 layout: default
 ---
 
-# 3.3 调度计数器的三个关键属性
+# 3.2 调度计数器的三个关键属性
 
 <SourceCode file="nanovllm/engine/sequence.py" lines="25-27" />
 
@@ -419,7 +419,7 @@ self.num_scheduled_tokens = 0    # 本轮 step 计划处理的 token 数
 layout: default
 ---
 
-# 3.3 计数器在 postprocess 中的更新时机
+# 3.2.1 计数器在 postprocess 中的更新时机
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="81-92" />
 
@@ -452,7 +452,7 @@ def postprocess(self, seqs, token_ids, is_prefill):
 layout: default
 ---
 
-# 3.4 block_table 与 block 分割公式
+# 3.3 block_table 与 block 分割公式
 
 <SourceCode file="nanovllm/engine/sequence.py" lines="55-65" />
 
@@ -497,7 +497,7 @@ block_table 与 block 分割公式。三个 property 在 block_table 分配、pr
 layout: default
 ---
 
-# 3.4 示例：用具体数值走一遍公式
+# 3.3.1 示例：用具体数值走一遍公式
 
 <SourceCode file="nanovllm/engine/sequence.py" lines="55-62" />
 
@@ -526,7 +526,7 @@ last_block_num_tokens = 1000 - (4 - 1) * 256  # = 1000 - 768 = 232
 layout: default
 ---
 
-# 3.4 物理视图
+# 3.3.2 物理视图
 
 <div class="mt-4">
 <h4 class="text-sm font-bold mb-2">block_size = 256，num_tokens = 1000</h4>
@@ -551,7 +551,7 @@ layout: default
 layout: default
 ---
 
-# 3.4 快速验证（block_size = 4）
+# 3.3.3 快速验证（block_size = 4）
 
 <div class="text-sm mt-4">
 
@@ -579,7 +579,7 @@ layout: default
 layout: default
 ---
 
-# 3.4 block_size 从哪里来
+# 3.3.4 block_size 从哪里来
 
 <SourceCode file="nanovllm/config.py" lines="6-18" />
 
@@ -610,7 +610,7 @@ block_size 的来源链：Config.kvcache_block_size → LLMEngine → Sequence.b
 layout: default
 ---
 
-# 3.4 last_token 字段
+# last_token 字段
 
 <SourceCode file="nanovllm/engine/sequence.py" lines="22-22" />
 
@@ -660,7 +660,7 @@ last_token 是实例字段(非 @property)，在 __init__ L22 初始化，在 app
 layout: default
 ---
 
-# 3.5 序列化：为 Tensor Parallel 服务
+# 3.4 序列化：为 Tensor Parallel 服务
 
 <SourceCode file="nanovllm/engine/sequence.py" lines="72-83" />
 
@@ -694,7 +694,7 @@ TP 序列化流程图：Rank 0 通过 SharedMemory 写入 pickle 数据，Event 
 layout: default
 ---
 
-# 3.5 TP 场景下的序列化流程图
+# 3.4.1 TP 场景下的序列化流程图
 
 ```mermaid {scale: 0.48}
 flowchart LR
@@ -722,7 +722,7 @@ __getstate__/__setstate__ 使 Sequence 可在多进程中 pickle 传输。核心
 layout: default
 ---
 
-# 3.5 对比：prefill vs decode 的 IPC 数据量
+# 3.4.2 对比：prefill vs decode 的 IPC 数据量
 
 <div class="text-sm">
 
@@ -754,7 +754,7 @@ TP 场景下，Rank 0 通过 SharedMemory 向其他 Rank 传输序列化后的 S
 layout: default
 ---
 
-# 3.6 状态与 is_prefill 标志的联动
+# 状态与 is_prefill 标志的联动
 
 <div class="text-sm">
 
@@ -1024,7 +1024,7 @@ Q1-Q2 自测题。Q1 关注 block_size 作为类变量的问题和改进方案�
 layout: default
 ---
 
-# 4.2 课后自测题（续）
+# 课后自测题（续）
 
 <SelfTest
   id="l02-q3"

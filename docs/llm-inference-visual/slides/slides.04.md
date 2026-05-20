@@ -372,17 +372,17 @@ layout: default
 
 <SourceCode file="nanovllm/engine/block_manager.py" lines="58-73" />
 
-```python {all|2-3|4|5-7|8-9|10}
+```python {all|4-5|6-7|8-9|10}
 def can_allocate(self, seq: Sequence) -> int:
     h = -1
     num_cached_blocks = 0
-    for i in range(seq.num_blocks - 1):            # ① 跳过最后一个不完整 block
-        token_ids = seq.block(i)                     # ② 取第 i 块的 token
-        h = self.compute_hash(token_ids, h)           # ③ 链式哈希计算
-        block_id = self.hash_to_block_id.get(h, -1)   # ④ 查全局哈希表
-        if block_id == -1 or self.blocks[block_id].token_ids != token_ids:
-            break                                       # ⑤ 未命中 / 碰撞 → 中断
-        num_cached_blocks += 1                          # ⑥ 命中计数
+    for i in range(seq.num_blocks - 1):                                   # ① 跳过最后一个不完整 block
+        token_ids = seq.block(i)                                          # ② 取第 i 块的 token
+        h = self.compute_hash(token_ids, h)                               # ③ 链式哈希计算
+        block_id = self.hash_to_block_id.get(h, -1)                       # ④ 查全局哈希表
+        if block_id == -1 or self.blocks[block_id].token_ids != token_ids: # ⑤ 未命中 / 碰撞 → 中断
+            break                                       
+        num_cached_blocks += 1                                            # ⑥ 命中计数
 ```
 
 <div class="mt-3 text-sm">
@@ -414,24 +414,24 @@ def can_allocate(self, seq: Sequence) -> int:
 
 ```python {all|2-3|5-6|7}
         ...
-        if block_id in self.used_block_ids:       # ① 命中的 block 是否在用？
+        if block_id in self.used_block_ids:        # ① 命中的 block 是否在用？
             num_new_blocks -= 1                    # ② 是 → 不需新分配
         # 继续循环直到 break 或遍历完
-    if len(self.free_block_ids) < num_new_blocks:
-        return -1                                  # ③ 空闲不够 → scheduler trigger preempt
+    if len(self.free_block_ids) < num_new_blocks:  # ③ 空闲不够 → scheduler trigger preempt
+        return -1                                  
     return num_cached_blocks                       # ④ 返回命中数
 ```
 
 <div class="mt-3 grid grid-cols-2 gap-3 text-sm">
 <div class="bg-green-500/10 border-l-3 border-green-500 p-3 rounded">
-  <strong>①② used_block_ids 检查</strong><br/>
-  命中的 block 如果仍被使用（ref_count &gt; 0），原地共享，<code>num_new_blocks</code> 减 1。<br/>
-  如果已被释放（从 used 移除但哈希映射还在），需要从 free 池<strong>重新取出</strong>给当前 seq——但 KV 数据不必重算。
+  <strong>① 命中后：共享 vs 重新取出</strong><br/>
+  ② 若 block 仍在 used 中（ref_count &gt; 0），<code>num_new_blocks</code> 减 1，原地共享。<br/>
+  若已被释放（哈希映射还在但不在 used），需从 free 池重新取出——KV 数据不必重算。
 </div>
 <div class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded">
-  <strong>③④ 返回 -1 与命中数</strong><br/>
-  ③ 空闲不够时返回 -1，调度器触发 preempt 腾空间后重试。<br/>
-  ④ 返回 <code>num_cached_blocks</code>——<code>allocate</code> 据此决定复用多少 block。
+  <strong>③④ 两种返回值</strong><br/>
+  ③ 空闲不够 → <code>return -1</code>，调度器触发 preempt 腾空间后重试。<br/>
+  ④ 空闲够 → <code>return num_cached_blocks</code>，<code>allocate</code> 据此决定复用多少 block。
 </div>
 </div>
 

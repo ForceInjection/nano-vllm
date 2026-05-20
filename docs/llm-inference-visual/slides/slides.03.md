@@ -322,6 +322,7 @@ flowchart TD
     DE4 --> DE5{"running 非空<br/>且 batch 有容量"}
     DE5 -- Yes --> DE1
     DE5 -- No --> RetD["return scheduled<br/>is_prefill=False"]
+```
 
 </div>
 

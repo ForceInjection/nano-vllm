@@ -298,37 +298,62 @@ class Scheduler:
 layout: default
 ---
 
-# schedule() 完整控制流
+# schedule() 控制流：Prefill 分支
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.3}
-flowchart LR
-    Start["Scheduler.schedule()"] --> PF{"waiting 非空<br/>且 batch 有容量"}
+```mermaid {scale: 0.65}
+flowchart TD
+    Start["Scheduler.schedule()"] --> PF{"waiting 非空<br/>且 batch 有容量?"}
     PF -- Yes --> PF1["取 waiting[0]"]
-    PF1 --> PF2{"remaining < num_tokens<br/>且 scheduled 非空"}
-    PF2 -- Yes --> PF3["break: chunked prefill<br/>只对第一条允许"]
+    PF1 --> PF2{"remaining < num_tokens<br/>且 scheduled 非空?"}
+    PF2 -- Yes --> PF3["break<br/>仅第一条可切分"]
     PF2 -- No --> PF4["设 num_scheduled_tokens<br/>推入 scheduled"]
     PF4 --> PF
-    PF -- No --> CK{"scheduled 为空"}
+    PF -- No --> CK{"scheduled 为空?"}
     PF3 --> CK
     CK -- No --> RetP["return scheduled<br/>is_prefill=True"]
-    CK -- Yes --> DE["进入 decode"]
-    DE --> DE1["从 running 取 seq"]
+    CK -- Yes --> DE["→ 进入 decode"]
+```
+
+</div>
+
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>Prefill 优先</strong>：只要 waiting 非空且 batch 有容量，就不断从队首取 seq。三个 break 条件控制退出。有产出就 <code>return True</code>，否则转入 decode。
+</div>
+
+<!--
+prefill 分支控制流。重点讲三个退出条件的位置和优先级，以及 scheduled 为空时转入 decode 的逻辑。
+-->
+
+---
+layout: default
+---
+
+# schedule() 控制流：Decode 分支
+
+<div class="flex justify-center">
+
+```mermaid {scale: 0.65}
+flowchart TD
+    DE["prefill 无产出<br/>进入 decode"] --> DE1["从 running 取 seq"]
     DE1 --> DE2{"can_append?"}
     DE2 -- No --> DE3["preempt<br/>释放 block 退回 waiting"]
     DE3 --> DE1
     DE2 -- Yes --> DE4["may_append<br/>设 num_scheduled_tokens=1"]
-    DE4 --> DE5{"running 非空<br/>且 batch 有容量"}
+    DE4 --> DE5{"running 非空<br/>且 batch 有容量?"}
     DE5 -- Yes --> DE1
     DE5 -- No --> RetD["return scheduled<br/>is_prefill=False"]
 ```
 
 </div>
 
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>Decode 逐条处理</strong>：从 running 队首 FIFO 取出，can_append 失败则抢占腾空间（循环重试），成功则固定 1 token。batch 满或 running 空时 <code>return False</code>。
+</div>
 
 <!--
-用 mermaid 流程图展示 schedule() 的完整决策树：prefill 优先、三退出条件、decode 阶段的 preempt 逻辑。建议学员先看流程再读代码。
+decode 分支控制流。重点讲 can_append/preempt 的 while 循环，以及 may_append 只在确认可调度后才分配 block。与教案 §3 的 decode 流程图保持一致。
 -->
 ---
 layout: default

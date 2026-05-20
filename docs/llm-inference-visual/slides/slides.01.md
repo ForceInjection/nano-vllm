@@ -210,7 +210,7 @@ flowchart LR
 layout: default
 ---
 
-# 展开：数据在 Transformer 中如何流动
+# 2.1.1 展开：数据在 Transformer 中如何流动
 
 以一个 3 词输入为例，追踪每一步的数据形状变化：
 
@@ -272,7 +272,7 @@ tokenizer.encode("你好, nano-vllm!") # → [108386, 11, 2037, 45, ...]
 layout: default
 ---
 
-# Tokenizer 在代码中的位置
+# 2.2.1 Tokenizer 在代码中的位置
 
 <SourceCode file="nanovllm/engine/llm_engine.py" lines="43-47" />
 
@@ -489,7 +489,7 @@ def generate(self, prompts, sampling_params):
 layout: default
 ---
 
-# add_request 深入：从 prompt 到 waiting 队列
+# 3.2.1 add_request 深入：从 prompt 到 waiting 队列
 
 <SourceCode file="nanovllm/engine/llm_engine.py" lines="43-47" />
 
@@ -859,7 +859,7 @@ def postprocess(self, seqs, token_ids, is_prefill):
 layout: default
 ---
 
-# 3.5 num_tokens 的符号：区分 prefill/decode 吞吐
+# num_tokens 的符号：区分 prefill/decode 吞吐
 
 <SourceCode file="nanovllm/engine/llm_engine.py" lines="72-80" />
 
@@ -1102,7 +1102,7 @@ Q1-Q2。如果时间充裕可现场让学生讨论答案，否则布置为课后
 layout: default
 ---
 
-# 4.2 课后自测题（续）
+# 课后自测题（续）
 
 <SelfTest
   id="l01-q3"
@@ -1126,7 +1126,7 @@ Q3-Q4。Q3 关于 is_finished 的设计哲学（单一职责），Q4 关于 Chun
 layout: default
 ---
 
-# 4.2 课后自测题（续二）
+# 课后自测题（续二）
 
 <SelfTest
   id="l01-q5"

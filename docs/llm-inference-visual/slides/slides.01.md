@@ -654,17 +654,17 @@ layout: default
 ```python {all|2-3|4|5-8|10-11}
 # 上半段条件全部通过后，执行调度动作
     if not seq.block_table:
-        self.block_manager.allocate(seq, num_cached_blocks)
-    seq.num_scheduled_tokens = min(num_tokens, remaining)
+        self.block_manager.allocate(seq, num_cached_blocks)  # ① 分配 KV block
+    seq.num_scheduled_tokens = min(num_tokens, remaining)    # ② 设定本步处理的 token 数
     num_batched_tokens += seq.num_scheduled_tokens
     if seq.num_cached_tokens + seq.num_scheduled_tokens == seq.num_tokens:
-        seq.status = SequenceStatus.RUNNING        # prefill 完成，进入 running
+        seq.status = SequenceStatus.RUNNING        # ③ WAITING → RUNNING
         self.waiting.popleft()
         self.running.append(seq)
     scheduled_seqs.append(seq)
 
 if scheduled_seqs:
-    return scheduled_seqs, True                    # 本轮走 prefill
+    return scheduled_seqs, True                    # ④ 本轮走 prefill
 ```
 
 <div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">

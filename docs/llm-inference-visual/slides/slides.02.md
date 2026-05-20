@@ -520,8 +520,8 @@ last_block_num_tokens = 1000 - (4 - 1) * 256  # = 1000 - 768 = 232
 
 </div>
 
-<div v-click="1" class="mt-3 text-xs opacity-70">
-  此公式在 block_table 分配、prefix cache 哈希、以及 attention 计算 mask 时反复使用。
+<div v-click="1" class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  💡 此公式在 <code>block_table</code> 分配、prefix cache 哈希、以及 attention 计算 mask 时反复使用。
 </div>
 
 <!--

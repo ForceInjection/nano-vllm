@@ -866,15 +866,15 @@ def postprocess(self, seqs, token_ids, is_prefill):
     for seq, token_id in zip(seqs, token_ids):
         self.block_manager.hash_blocks(seq)             # ① 前缀缓存登记
         seq.num_cached_tokens += seq.num_scheduled_tokens  # ② 累计已完成 token
-        seq.num_scheduled_tokens = 0                       # ② 清零本轮计数
+        seq.num_scheduled_tokens = 0                       # 清零本轮计数
         if is_prefill and seq.num_cached_tokens < seq.num_tokens:
-            continue                                    # ③ chunked prefill 尚未完成
+            continue                                    # chunked prefill 尚未完成
         seq.append_token(token_id)                      # ③ 追加生成的 token
         if (not seq.ignore_eos and token_id == self.eos) \
            or seq.num_completion_tokens == seq.max_tokens:
             seq.status = SequenceStatus.FINISHED        # ④ 标记完成
-            self.block_manager.deallocate(seq)          # ④ 回收 KV blocks
-            self.running.remove(seq)                    # ④ 移出运行队列
+            self.block_manager.deallocate(seq)          # 回收 KV blocks
+            self.running.remove(seq)                    # 移出运行队列
 ```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">

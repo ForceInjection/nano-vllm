@@ -796,24 +796,24 @@ layout: default
 
 <SourceCode file="nanovllm/engine/scheduler.py" lines="57-73" />
 
-```python {all|3|4-9|10-13|14-16}
+```python {all|3|4-9|10-14|15-17}
 # Scheduler.schedule 中的 decode 循环
 while self.running and len(scheduled_seqs) < self.max_num_seqs:
-    seq = self.running.popleft()            # ① FIFO 从队首取
+    seq = self.running.popleft()                             # ① FIFO 从队首取
     while not self.block_manager.can_append(seq):
         if self.running:
-            self.preempt(self.running.pop()) # ② KV 不够 → 抢占队尾
+            self.preempt(self.running.pop())                 # ② KV 不够 → 抢占队尾
         else:
-            self.preempt(seq)                # ② 只剩自己也被抢占
+            self.preempt(seq)                                # 只剩自己也被抢占
             break
     else:
-        seq.num_scheduled_tokens = 1         # ③ 固定 1 token/step
+        seq.num_scheduled_tokens = 1                         # ③ 固定 1 token/step
         seq.is_prefill = False
-        self.block_manager.may_append(seq)   # ③ block 满了追加新的
+        self.block_manager.may_append(seq)                   # block 满了追加新的
         scheduled_seqs.append(seq)
-assert scheduled_seqs                        # ④ 至少调度一条
-self.running.extendleft(reversed(scheduled_seqs))  # ④ 恢复队列顺序
-return scheduled_seqs, False                 # ④ 本轮走 decode
+assert scheduled_seqs                                        # 至少调度一条
+self.running.extendleft(reversed(scheduled_seqs))            # ④ 恢复队列顺序，返回 decode
+return scheduled_seqs, False
 ```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">

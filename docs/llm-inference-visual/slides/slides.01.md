@@ -772,9 +772,17 @@ max_num_seqs: int = 512             # 每轮最多 512 条 seq
 
 **调度循环的退出条件**（按优先级）：
 
-1. `remaining == 0` → token 预算用尽
-2. `num_cached_blocks == -1` → KV cache 不够，分不到 block
-3. `remaining < num_tokens and scheduled_seqs` → 已有 seq 在 batch 中，不再切分新 seq
+<div class="space-y-2">
+<div class="p-2 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
+  1. <code>remaining == 0</code> → token 预算用尽
+</div>
+<div class="p-2 bg-red-500/10 border-l-3 border-red-500 rounded-r text-sm">
+  2. <code>num_cached_blocks == -1</code> → KV cache 不够，分不到 block
+</div>
+<div class="p-2 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
+  3. <code>remaining &lt; num_tokens and scheduled_seqs</code> → 已有 seq 在 batch 中，不再切分新 seq
+</div>
+</div>
 
 </div>
 

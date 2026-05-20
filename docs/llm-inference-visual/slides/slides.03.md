@@ -492,14 +492,12 @@ layout: default
 
 prefill 循环中有三个 <code>break</code>，它们的执行顺序决定批拼接行为：
 
-```python {all|5-6|10-11|16-17}
+```python {all|4-5|8-9|13-14}
 while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
     seq = self.waiting[0]
     remaining = self.max_num_batched_tokens - num_batched_tokens
-
     if remaining == 0:                                                       # 条件①
         break                                                                # 优先级最高
-
     if not seq.block_table:
         num_cached_blocks = self.block_manager.can_allocate(seq)
         if num_cached_blocks == -1:                                          # 条件②
@@ -507,12 +505,11 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
         num_tokens = seq.num_tokens - num_cached_blocks * self.block_size
     else:
         num_tokens = seq.num_tokens - seq.num_cached_tokens
-
-    if remaining < num_tokens and scheduled_seqs:
-        break                                                                 # 条件③ — 优先级最低
+    if remaining < num_tokens and scheduled_seqs:                            # 条件③ — 优先级最低
+        break                                                                 
 ```
 
-<div class="grid grid-cols-3 gap-3 mt-4 text-sm">
+<div class="grid grid-cols-3 gap-3 mt-4 text-xs">
 <div class="bg-red-500/10 p-3 rounded">
   <strong>① remaining == 0</strong><br/>
   Token 预算已用尽。本轮无法再添加任何 seq——立即停止循环。
@@ -527,7 +524,7 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
 </div>
 </div>
 
-<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-xs">
   <strong>为什么条件③放最后？</strong>条件①和②是硬限制——无论如何都无法继续。条件③是设计约束——如果 <code>scheduled_seqs</code> 为空（当前 seq 是 batch 的第一条），条件③不触发，允许 chunked prefill。如果非空，<code>break</code> 退出 while 循环，已调度的 seq 进入下一阶段，该 seq 留在 waiting 等待下一轮 prefill。</div>
 
 
@@ -782,7 +779,7 @@ layout: default
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.7}
+```mermaid {scale: 0.5}
 flowchart TD
     A["seq 在 waiting 头部<br/>is_prefill=True<br/>block_table 已清空"] --> B["schedule() prefill 分支"]
     B --> C["can_allocate(seq)<br/>= 0（无缓存命中）"]
@@ -817,7 +814,7 @@ layout: default
 | 被驱逐者感知 | 透明——进程无感知 | 非透明——seq 变回 WAITING |
 | 资源粒度 | 4 KB 页框 | 256 token / block |
 
-<div class="mt-4 grid grid-cols-2 gap-4 text-sm">
+<div class="mt-4 grid grid-cols-2 gap-4 text-xs">
 <div class="bg-blue-500/10 border-l-3 border-blue-500 p-3 rounded">
   <strong>为什么 nano-vllm 不做持久化？</strong><br/>
   GPU 显存带宽 >> 磁盘带宽。KV cache 重算开销（GPU 前向传播）小于从磁盘读回——尽管完整重算几百 token 比读页慢，但省去了数据传输路径和磁盘寿命开销。这是"计算换存储"。
@@ -903,8 +900,8 @@ simulate_prefill([300, 800, 200], max_batched=1000)
 <!--
 展示 §1-2 模拟代码和预期输出：三条短 seq 全部塞入、一条长 seq 被切分、chunked prefill 对第一条有效。逐行解释模拟函数逻辑。
 -->
----
 
+---
 layout: default
 ---
 
@@ -963,7 +960,7 @@ layout: default
 
 # 4.1 课堂练习
 
-用整数模拟 prefill 批拼接：
+用整数模拟 prefill 批拼接，验证 chunked prefill 限制：
 
 ```python
 def simulate_prefill(prompt_lens, max_batched_tokens,
@@ -988,9 +985,12 @@ print(simulate_prefill([1000, 900, 800], max_batched_tokens=1200))
 # → [(0, 1000)]  — seq[1] 和 seq[2] 被跳过
 ```
 
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  💡 <strong>观察要点</strong>：seq[0] 的 1000 token 被整条塞入后只剩 200 预算。seq[1] 需要 900 > 200，且 <code>scheduled</code> 已非空，触发 chunked prefill 限制 → <code>break</code>。seq[1] 和 seq[2] 本轮被跳过。
+</div>
 
 <!--
-展示 simulate_prefill 函数，要求学员用整数模拟 prefill 批拼接。建议让学员手动计算 [1000, 900, 800] 在 max_batched_tokens=1200 时的输出。
+展示 simulate_prefill 函数，要求学员用整数模拟 prefill 批拼接。让学员手动计算并对比输出，观察 chunked prefill 限制。
 -->
 ---
 layout: default

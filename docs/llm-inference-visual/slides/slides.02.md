@@ -178,8 +178,8 @@ stateDiagram-v2
     FINISHED --> [*]
 ```
 
-<div v-click class="mt-3 text-sm opacity-80">
-  类比操作系统的进程三态模型：WAITING = ready、RUNNING = running、FINISHED = terminated。preempt 类似被换出（swap out）。
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  类比操作系统的进程<strong>三态模型</strong>：WAITING = ready、RUNNING = running、FINISHED = terminated。preempt 类似被换出（swap out）。
 </div>
 
 
@@ -238,8 +238,8 @@ flowchart TD
     LOGIC --> MAP --> PHYS
 ```
 
-<div v-click class="mt-3 text-sm opacity-80">
-  好处：小粒度分配（按 block 而非整条序列）、碎片少、可动态追加、共享前缀时只需引用同一批 block
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>好处</strong>：小粒度分配（按 block 而非整条序列）、碎片少、可动态追加、共享前缀时只需引用同一批 block
 </div>
 
 
@@ -663,7 +663,7 @@ def __setstate__(self, state):
         self.last_token = last_state               # 只保留最后一个
 ```
 
-<div v-click class="mt-3 text-sm opacity-80">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>为什么区分？</strong>prefill 阶段子进程需要全部 prompt token 计算 KV；decode 阶段只需最后一个 token 做前向。减少 decode 的 IPC 带宽是关键优化。
 </div>
 
@@ -691,7 +691,7 @@ flowchart TD
     R1 --> EX["执行 run()"]
 ```
 
-<div v-click class="mt-3 text-sm opacity-80">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   这正是 <code>Sequence.__getstate__</code> 只传输必要字段的原因：prefill 传输完整 <code>token_ids</code> 列表，decode 只传 <code>last_token</code>（一个 int）。
 </div>
 

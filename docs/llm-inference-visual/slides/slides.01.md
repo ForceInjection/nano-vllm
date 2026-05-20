@@ -228,7 +228,7 @@ flowchart LR
 
 </div>
 
-<div v-click class="mt-3 text-sm opacity-80">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   🔑 <strong>关键</strong>：每层的输入输出形状相同（都是 <code>[seq_len, hidden_dim]</code>），因此可以堆叠任意多层。只有 LM Head 把维度从 hidden_dim 映射到词表大小。
 </div>
 
@@ -357,7 +357,7 @@ layout: default
 | **调度优先级**      | 优先（`waiting` 非空就不 decode） | 次要                           |
 | **num_tokens 符号** | 正数（= Σ scheduled）             | 负数（= -len(seqs)）           |
 
-<div v-click class="mt-3 text-sm opacity-80">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   ⚡ <strong>性能含义</strong>：Prefill 吞吐高（一次处理多个 token），Decode 延迟低（每次只推 1 token）。引擎的吞吐统计正是靠 <code>num_tokens</code> 的正负来区分两种模式。
 </div>
 
@@ -597,7 +597,7 @@ flowchart LR
     SCHED --> RUN --> POST
 ```
 
-<div v-click class="mt-3 text-sm opacity-80">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   三个步骤<strong>同步串行</strong>执行。一次 step 只走一种模式（prefill 或 decode），不混合。
 </div>
 

@@ -495,7 +495,7 @@ seq_b: [A,B,C,D, E,F,G,H, K,L,M,N]             (14 tokens → 4 blocks)
 def allocate(self, seq: Sequence, num_cached_blocks: int):
     assert not seq.block_table
     h = -1
-    for i in range(num_cached_blocks):
+    for i in range(num_cached_blocks):                      # ① 复用命中缓存
         token_ids = seq.block(i)
         h = self.compute_hash(token_ids, h)
         block_id = self.hash_to_block_id[h]
@@ -507,10 +507,14 @@ def allocate(self, seq: Sequence, num_cached_blocks: int):
             self.free_block_ids.remove(block_id)
             self.used_block_ids.add(block_id)
         seq.block_table.append(block_id)
-    for i in range(num_cached_blocks, seq.num_blocks):
+    for i in range(num_cached_blocks, seq.num_blocks):     # ② 新分配剩余 block
         seq.block_table.append(self._allocate_block())
     seq.num_cached_tokens = num_cached_blocks * self.block_size
 ```
+
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  两步分配：① 复用 <code>can_allocate</code> 返回的 num_cached_blocks 个已有 block（ref_count+1）；② 剩余 block 从 free 池新分配（ref_count=1）。最后设置 <code>num_cached_tokens</code>。
+</div>
 
 <div v-click class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   💡 引用计数规则：cached block → ref_count+1（共享）；新 block → ref_count=1（独占）。
@@ -554,17 +558,21 @@ layout: default
 
 ```python
 def hash_blocks(self, seq: Sequence):
-    start = seq.num_cached_tokens // self.block_size
-    end = (seq.num_cached_tokens + seq.num_scheduled_tokens) // self.block_size
-    if start == end: return
+    start = seq.num_cached_tokens // self.block_size               # ① 本轮起点
+    end = (seq.num_cached_tokens + seq.num_scheduled_tokens) // self.block_size  # 本轮终点
+    if start == end: return                                       # ② 无新完整 block
     h = self.blocks[seq.block_table[start - 1]].hash if start > 0 else -1
-    for i in range(start, end):
+    for i in range(start, end):                                   # ③ 逐块哈希登记
         block = self.blocks[seq.block_table[i]]
         token_ids = seq.block(i)
         h = self.compute_hash(token_ids, h)
         block.update(h, token_ids)
         self.hash_to_block_id[h] = block.block_id
 ```
+
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  三步：① <code>start/end</code> 由 num_cached_tokens 和 num_scheduled_tokens 精确界定本轮范围；② 无新完整 block 则直接返回；③ 逐块计算链式哈希并通过 <code>block.update()</code> 登记到 <code>hash_to_block_id</code>。
+</div>
 
 <div v-click class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   🔑 <strong>只登记完整 block</strong>：最后一个不完整 block 不参与前缀复用——因为它的 token 还不全，哈希值不代表最终内容。这也是为什么 <code>postprocess</code> 在每轮之后调用 <code>hash_blocks</code>。
@@ -638,13 +646,13 @@ layout: default
 
 ```python {all|2-3|4|5-6|7-8}
 def deallocate(self, seq: Sequence):
-    for block_id in reversed(seq.block_table):
+    for block_id in reversed(seq.block_table):     # ① 逆序遍历 block_table
         block = self.blocks[block_id]
-        block.ref_count -= 1
+        block.ref_count -= 1                        # ② ref_count 递减
         if block.ref_count == 0:
-            self._deallocate_block(block_id)
-    seq.num_cached_tokens = 0
-    seq.block_table.clear()
+            self._deallocate_block(block_id)         # ③ 归零 → 回收
+    seq.num_cached_tokens = 0                       # ④ 重置计数器
+    seq.block_table.clear()                         # ④ 清空 block_table
 ```
 
 <div class="mt-3 text-xs">

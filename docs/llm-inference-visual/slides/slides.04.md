@@ -372,7 +372,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/block_manager.py" lines="58-73" />
 
-```python {all|4-5|6-7|8-9|10}
+```python {all|4|5|6-7|8-9|10}
 def can_allocate(self, seq: Sequence) -> int:
     h = -1
     num_cached_blocks = 0
@@ -412,7 +412,7 @@ def can_allocate(self, seq: Sequence) -> int:
 
 # can_allocate 逐行走读（下）：空闲检查与返回值
 
-```python {all|2-3|5-6|7}
+```python {all|2|3|5-6|7}
         ...
         if block_id in self.used_block_ids:        # ① 命中的 block 是否在用？
             num_new_blocks -= 1                    # ② 是 → 不需新分配
@@ -656,8 +656,11 @@ def deallocate(self, seq: Sequence):
     <strong>ref_count == 0 才真正回收</strong><br/>
     <code>_deallocate_block</code> 把 block_id 从 used 移回 free 池。注意：<strong>不删除 hash_to_block_id</strong>——这是 prefix cache 持久化的关键：哈希索引还在，block 的物理内容仍在。
   </div>
-  <div v-click="3" class="p-3 bg-green-500/10 border-l-3 border-green-500 rounded">
+  <div v-click="3" class="p-3 bg-green-500/10 border-l-3 border-green-500 rounded mb-2">
     <strong>示例</strong>：共享 block 被两个 seq 引用（ref_count=2）。seq_a deallocate → ref_count=1（未释放）。seq_b deallocate → ref_count=0 → 回到 free 池。后续新 seq 如果哈希链匹配，仍可从 hash_to_block_id 找到它——block 的 KV cache 数据不需要重新计算。
+  </div>
+  <div v-click="4" class="p-3 bg-purple-500/10 border-l-3 border-purple-500 rounded">
+    <strong>循环后清理</strong>：<code>num_cached_tokens = 0</code>，<code>block_table.clear()</code>。seq 回到初始状态，下一轮 schedule 重新走 prefill 恢复。
   </div>
 </div>
 

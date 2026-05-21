@@ -345,35 +345,6 @@ positions = torch.tensor(positions, dtype=torch.int64)
 layout: default
 ---
 
-# 3.3 cu_seqlens_k：KV 侧可能更长
-
-<SourceCode file="nanovllm/engine/model_runner.py" lines="162-163" />
-
-```python
-# cu_seqlens_k 在 prefix cache 场景下可能大于 cu_seqlens_q
-cu_seqlens_k = [0]
-for seq in seqs:
-    # KV 侧长度 = 已缓存 token + 本轮新增 token
-    seqlen_k = seq.num_cached_tokens + seq.num_scheduled_tokens
-    cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
-
-need_block_tables = cu_seqlens_k[-1] > cu_seqlens_q[-1]
-```
-
-<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>要点总览</strong>：KV 侧长度 = cached + scheduled。当任一 seq 有缓存历史 token 时，cu_seqlens_k > cu_seqlens_q，触发 block_tables 传递。
-</div>
-
-<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
-  <strong>当 prefix cache 命中时</strong>：<code>seqlen_k > seqlen_q</code>——因为 K/V cache 中已存在历史 token 的 KV，但 Query 侧只有本轮新增的 token。此时需要 <code>block_tables</code> 来访问已缓存的 KV。
-</div>
-
-<!-- cu_seqlens_k 在 prefix cache 场景下 > cu_seqlens_q，触发 block_tables 传递用于读取历史 KV。 -->
-
----
-layout: default
----
-
 # 3.2 cu_seqlens_q 与 cu_seqlens_k 对比
 
 <div class="grid grid-cols-2 gap-4 mt-3 text-sm">
@@ -411,11 +382,40 @@ K 侧多出 4 个历史 token。cu_k[-1]=9 > cu_q[-1]=5。
 </div>
 </div>
 
-<div v-click class="mt-3 text-sm bg-blue-500/10 p-3 rounded">
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
   <strong>对 attention 的影响</strong>：seq_b 的注意力矩阵形状是 (2, 6) 而非 (2, 2)——因为 Q 只有 2 个新 token，但 K/V 需读取全部 6 个（4 个缓存 + 2 个新）。
 </div>
 
 <!-- 左右对比有/无 prefix cache 时 cu_seqlens_q 和 cu_seqlens_k 的差异，注意力矩阵形状因此不同。 -->
+
+---
+layout: default
+---
+
+# 3.3 cu_seqlens_k：KV 侧可能更长
+
+<SourceCode file="nanovllm/engine/model_runner.py" lines="162-163" />
+
+```python
+# cu_seqlens_k 在 prefix cache 场景下可能大于 cu_seqlens_q
+cu_seqlens_k = [0]
+for seq in seqs:
+    # KV 侧长度 = 已缓存 token + 本轮新增 token
+    seqlen_k = seq.num_cached_tokens + seq.num_scheduled_tokens
+    cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
+
+need_block_tables = cu_seqlens_k[-1] > cu_seqlens_q[-1]
+```
+
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>要点总览</strong>：KV 侧长度 = cached + scheduled。当任一 seq 有缓存历史 token 时，cu_seqlens_k > cu_seqlens_q，触发 block_tables 传递。
+</div>
+
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
+  <strong>当 prefix cache 命中时</strong>：<code>seqlen_k > seqlen_q</code>——因为 K/V cache 中已存在历史 token 的 KV，但 Query 侧只有本轮新增的 token。此时需要 <code>block_tables</code> 来访问已缓存的 KV。
+</div>
+
+<!-- cu_seqlens_k 在 prefix cache 场景下 > cu_seqlens_q，触发 block_tables 传递用于读取历史 KV。 -->
 
 ---
 layout: default

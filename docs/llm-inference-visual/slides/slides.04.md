@@ -525,18 +525,6 @@ layout: default
 
 # allocate 的两种分配路径对比
 
-```python
-def allocate(self, seq: Sequence, num_cached_blocks: int):
-    # 路径 A：复用 cached blocks
-    for i in range(num_cached_blocks):
-        ...
-        self.blocks[block_id].ref_count += 1      # 共享，ref_count++
-
-    # 路径 B：从 free 池分配新 block
-    for i in range(num_cached_blocks, seq.num_blocks):
-        seq.block_table.append(self._allocate_block())  # 独占，ref_count=1
-```
-
 <div class="mt-4 text-sm">
 
 | 方面 | 路径 A：复用 cached block | 路径 B：分配新 block |

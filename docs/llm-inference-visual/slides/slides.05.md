@@ -504,7 +504,7 @@ layout: default
 ```python {all|2-4|5-9|10-11}
 def prepare_prefill(self, seqs: list[Sequence]):
     input_ids, positions = []                                        # ① 初始化
-    cu_seqlens_q, cu_seqlens_k = [0], [0]                           # ① 序列边界
+    cu_seqlens_q, cu_seqlens_k = [0], [0]                            # 序列边界
     slot_mapping, block_tables = [], None
     for seq in seqs:
         start = seq.num_cached_tokens
@@ -537,9 +537,9 @@ layout: default
 
 <SourceCode file="nanovllm/engine/model_runner.py" lines="149-170" />
 
-```python {all|1-10|11-12|13}
+```python {all|1-10|11-12|13-15}
         if not seq.block_table: continue                             # ⑥ warmup 跳过
-        start_block = start // self.block_size                       # ⑥ 逐 block 计算 slot
+        start_block = start // self.block_size                       # 逐 block 计算 slot
         end_block = (end + self.block_size - 1) // self.block_size
         for i in range(start_block, end_block):
             slot_start = seq.block_table[i] * self.block_size
@@ -550,7 +550,9 @@ layout: default
             slot_mapping.extend(range(slot_start, slot_end))
     if cu_seqlens_k[-1] > cu_seqlens_q[-1]:                          # ⑦ prefix cache?
         block_tables = self.prepare_block_tables(seqs)
-    # ⑧ 张量创建 (int64/id_pos, int32/cu_slot) + set_context(True,...) → return
+    input_ids = torch.tensor(input_ids, dtype=torch.int64)            # ⑧ 转为张量
+    set_context(True, cu_seqlens_q, cu_seqlens_k, ..., block_tables)  # ⑧ 注入 Context
+    return input_ids, positions                                       # ⑧ 返回
 ```
 
 <div class="mt-3 grid grid-cols-2 gap-2 text-sm">

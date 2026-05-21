@@ -423,10 +423,19 @@ layout: default
 
 # 3.4 slot_mapping：逻辑 token → 物理 KV 位置
 
-slot_mapping 将每个 token 的**逻辑位置**（在序列中的第几个 token）映射为 **KV cache 的物理 slot**（显存中的哪个位置）：
+slot_mapping 将每个 token 的逻辑位置映射为 KV cache 的物理 slot：
+
+```python
+for i in range(start_block, end_block):
+    slot_start = seq.block_table[i] * self.block_size       # 物理 block 起始
+    if i == start_block:
+        slot_start += start % self.block_size               # 首块偏移
+    # ... 确定 slot_end ...
+    slot_mapping.extend(range(slot_start, slot_end))        # 批量收集
+```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>核心公式</strong>：<code>slot = block_table[i // block_size] * block_size + i % block_size</code>。逐 block 计算 slot 范围，收集为 int32 张量。例：第 0 个 token 可能写在物理 block 7 的位置 0 → slot = 7 × 256 + 0 = 1792。下一页看完整代码走读。
+  <strong>核心公式</strong>：<code>slot = block_table[i // block_size] * block_size + i % block_size</code>。逐 block 计算 slot 范围，收集为 int32 张量。下一页看完整代码和公式拆解。
 </div>
 
 <!-- slot_mapping 通过 block_table 将逻辑 token 索引映射到物理 KV cache slot。 -->

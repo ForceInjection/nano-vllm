@@ -553,25 +553,10 @@ class Context:
     block_tables: torch.Tensor | None = None
 
 _CONTEXT = Context()
-
-def get_context():
-    return _CONTEXT
-
-def set_context(is_prefill, cu_seqlens_q=None, cu_seqlens_k=None, max_seqlen_q=0, max_seqlen_k=0, slot_mapping=None, context_lens=None, block_tables=None):
-    global _CONTEXT
-    _CONTEXT = Context(is_prefill, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, context_lens, block_tables)
-
-def reset_context():
-    global _CONTEXT
-    _CONTEXT = Context()
 ```
 
 <div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>设计总览</strong>：Context 通过模块级全局变量存储调度元数据，Attention 内部用 get_context() 读取——不改变 forward 签名即可获取 KV cache 写入位置与变长边界。
-</div>
-
-<div v-click class="mt-3 text-sm">
-  <strong>设计原因</strong>：Attention.forward 的标准签名是 <code>(hidden_states, ...)</code>——不改签名就能拿到调度元数据。但注意实际实现用的是模块级全局变量 <code>_CONTEXT</code>，而非 <code>threading.local()</code>。
+  <strong>设计总览</strong>：Context 用 <code>@dataclass</code> 定义八个字段，模块级全局变量 <code>_CONTEXT</code> 存储单例。Attention 内部通过 <code>get_context()</code> 读取元数据——不改变 forward 签名。set/reset_context 生命周期见下一页。
 </div>
 
 <!-- Context 通过模块级全局变量 _CONTEXT 存储调度元数据，不改变 forward 签名。 -->

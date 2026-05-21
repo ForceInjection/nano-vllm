@@ -522,10 +522,12 @@ def prepare_prefill(self, seqs: list[Sequence]):
 <div v-click="2" class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
   <strong>②③ 展平拼接</strong><br/><code>extend(seq[start:end])</code> 和 <code>extend(range(start,end))</code> 将不等长序列拼接为 1D 列表。
 </div>
-<div v-click="3" class="p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r">
+</div>
+
+<div v-click="3" class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>④⑤ 前缀和</strong><br/>cu_seqlens_q 累计 scheduled（Q 侧），cu_seqlens_k 累计 cached+scheduled（K 侧）。prefix cache 下两者不同。
 </div>
-</div>
+
 
 <!-- prepare_prefill 上半部分：初始化+主循环收集 input_ids/positions/cu_seqlens。 -->
 
@@ -599,7 +601,7 @@ _CONTEXT = Context()
 ```
 
 <div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>设计总览</strong>：Context 用 <code>@dataclass</code> 定义八个字段，模块级全局变量 <code>_CONTEXT</code> 存储单例。Attention 内部通过 <code>get_context()</code> 读取元数据——不改变 forward 签名。set/reset_context 生命周期见下一页。
+  <strong>设计总览</strong>：Context 用 <code>@dataclass</code> 定义八个字段，模块级全局变量 <code>_CONTEXT</code> 存储单例。Attention 内部通过 <code>get_context()</code> 读取元数据——不改变 forward 签名。字段清单和 set/reset_context 生命周期见后续两页。
 </div>
 
 <!-- Context 通过模块级全局变量 _CONTEXT 存储调度元数据，不改变 forward 签名。 -->
@@ -625,7 +627,7 @@ layout: default
 
 </div>
 
-<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-xs">
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
   <strong>核心规律</strong>：prefill 用 cu_seqlens 处理变长批，decode 用 context_lens + block_tables 定位历史 KV。两套机制分工明确，互不重叠。
 </div>
 

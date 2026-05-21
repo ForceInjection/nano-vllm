@@ -524,7 +524,9 @@ def prepare_prefill(self, seqs: list[Sequence]):
         max_seqlen_k = max(seqlen_k, max_seqlen_k)
 ```
 
-<div class="mt-2 text-xs opacity-70">上半部分：变量初始化 + 主循环（input_ids/positions/cu_seqlens/max_seqlen）。下半部分：slot_mapping + 张量创建 + prefix cache 判断 + set_context。</div>
+<div class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>上半部分</strong>：变量初始化 + 主循环收集 input_ids/positions/cu_seqlens/max_seqlen。下半部分看 slot_mapping + 张量创建 + set_context。
+</div>
 
 <!-- prepare_prefill 上半部分：初始化变量 + 主循环中收集各 seq 的 input_ids、positions、cu_seqlens、max_seqlen。 -->
 
@@ -561,7 +563,9 @@ layout: default
     return input_ids, positions
 ```
 
-<div class="mt-2 text-xs opacity-70">slot_mapping 按 block 批量计算 + prefix cache 判断 → prepare_block_tables + int64/int32 张量创建 + set_context 注入 + 返回 input_ids/positions。</div>
+<div class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>下半部分</strong>：slot_mapping 按 block 批量计算 → prefix cache 判断 → block_tables → int64/int32 张量创建 → set_context 注入 → 返回 input_ids/positions。
+</div>
 
 <!-- prepare_prefill 下半部分：slot_mapping 按 block 批量计算 + prefix cache 判断 + 张量创建 + set_context 注入。 -->
 

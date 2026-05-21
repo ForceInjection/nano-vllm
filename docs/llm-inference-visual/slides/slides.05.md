@@ -360,7 +360,7 @@ for seq in seqs:
 need_block_tables = cu_seqlens_k[-1] > cu_seqlens_q[-1]
 ```
 
-<div v-click class="mt-2 text-sm bg-green-500/10 border-l-3 border-green-500 rounded-r">
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>要点总览</strong>：KV 侧长度 = cached + scheduled。当任一 seq 有缓存历史 token 时，cu_seqlens_k > cu_seqlens_q，触发 block_tables 传递。
 </div>
 
@@ -447,7 +447,7 @@ for seq in seqs:
 slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32)
 ```
 
-<div v-click class="mt-2 text-sm bg-green-500/10 border-l-3 border-green-500 rounded-r">
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>两步总览</strong>：① 按 block 批量计算 slot 范围 range(slot_start, slot_end) → ② 收集为 int32 张量。每 token 的 slot 标识其在 KV cache 中的物理写入位置。
 </div>
 
@@ -646,7 +646,7 @@ def reset_context():
     _CONTEXT = Context()
 ```
 
-<div v-click class="mt-2 text-sm bg-green-500/10 border-l-3 border-green-500 rounded-r">
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>设计总览</strong>：Context 通过模块级全局变量存储调度元数据，Attention 内部用 get_context() 读取——不改变 forward 签名即可获取 KV cache 写入位置与变长边界。
 </div>
 
@@ -705,7 +705,7 @@ output = self.model(input_ids, positions)  # Attention 内部 get_context()
 reset_context()                              # 清空，防止泄漏到下一步
 ```
 
-<div v-click class="mt-3 text-sm bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
   📍 <strong>关键</strong>：<code>set_context</code> 在每步前注入 → Attention 内部 <code>get_context()</code> 读取 → <code>reset_context</code> 在每步后清空。这个模式是 nano-vllm 最独特的设计之一。
 </div>
 

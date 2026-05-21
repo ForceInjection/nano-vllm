@@ -501,39 +501,75 @@ layout: default
 
 <SourceCode file="nanovllm/engine/model_runner.py" lines="129-170" />
 
-<div class="text-xs" style="font-size:0.7rem;line-height:1.2rem;">
+# prepare_prefill 完整代码走读（上）
+
+<SourceCode file="nanovllm/engine/model_runner.py" lines="129-148" />
 
 ```python
 def prepare_prefill(self, seqs: list[Sequence]):
-    input_ids, positions = [], []                               # ① 初始化收集列表
-    cu_seqlens_q, cu_seqlens_k = [0], [0]                      # ① 序列边界
+    input_ids, positions = []                                        # ① 初始化
+    cu_seqlens_q, cu_seqlens_k = [0], [0]                           # ① 序列边界
     slot_mapping, block_tables = [], None
     for seq in seqs:
-        start, end = seq.num_cached_tokens, seq.num_cached_tokens + seq.num_scheduled_tokens
-        input_ids.extend(seq[start:end])                        # ② 展平 token
-        positions.extend(range(start, end))                     # ③ 绝对位置
-        cu_seqlens_q.append(cu_seqlens_q[-1] + end - start)     # ④ Q 侧前缀和
-        cu_seqlens_k.append(cu_seqlens_k[-1] + end)             # ⑤ K 侧前缀和
-        if not seq.block_table: continue                        # warmup 跳过
-        start_block = start // self.block_size                  # ⑥ slot: 逐 block
-        end_block = (end + self.block_size - 1) // self.block_size
-        for i in range(start_block, end_block):
-            slot_start = seq.block_table[i] * self.block_size   # 物理 block 起始
-            if i == start_block: slot_start += start % self.block_size
-            if i != end_block - 1:
-                slot_end = seq.block_table[i] * self.block_size + self.block_size
-            else: slot_end = seq.block_table[i] * self.block_size + end - i * self.block_size
-            slot_mapping.extend(range(slot_start, slot_end))
-    if cu_seqlens_k[-1] > cu_seqlens_q[-1]:                     # ⑦ prefix cache?
-        block_tables = self.prepare_block_tables(seqs)
-    # ⑧ int64/id_pos, int32/cu_slot → set_context(True, ...) → return input_ids, positions
+        start = seq.num_cached_tokens
+        end = start + seq.num_scheduled_tokens
+        input_ids.extend(seq[start:end])                             # ② 展平 token
+        positions.extend(range(start, end))                          # ③ 绝对位置
+        cu_seqlens_q.append(cu_seqlens_q[-1] + end - start)          # ④ Q 侧前缀和
+        cu_seqlens_k.append(cu_seqlens_k[-1] + end)                  # ⑤ K 侧前缀和
 ```
 
+<div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+<div v-click="1" class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
+  <strong>① 初始化</strong><br/>六个收集列表 + 两个前缀和起点。cu_seqlens_q/k 以 [0] 开头，slot_mapping 空列表，block_tables=None。
+</div>
+<div v-click="2" class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
+  <strong>②③ 展平拼接</strong><br/><code>extend(seq[start:end])</code> 和 <code>extend(range(start,end))</code> 将不等长序列拼接为 1D 列表。
+</div>
+<div v-click="3" class="p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r">
+  <strong>④⑤ 前缀和</strong><br/>cu_seqlens_q 累计 scheduled（Q 侧），cu_seqlens_k 累计 cached+scheduled（K 侧）。prefix cache 下两者不同。
+</div>
 </div>
 
-<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>八步总览</strong>：① 初始化七变量 → ②③④⑤ 主循环展平拼接 → ⑥ slot_mapping 按 block 计算 → ⑦ prefix cache 判断 → ⑧ 张量创建 + set_context 注入。完整源码见 model_runner.py L129-L170。
+<!-- prepare_prefill 上半部分：初始化+主循环收集 input_ids/positions/cu_seqlens。 -->
+
+---
+layout: default
+---
+
+# prepare_prefill 完整代码走读（下）
+
+<SourceCode file="nanovllm/engine/model_runner.py" lines="149-170" />
+
+```python
+        if not seq.block_table: continue                             # ⑥ warmup 跳过
+        start_block = start // self.block_size                       # ⑥ 逐 block 计算 slot
+        end_block = (end + self.block_size - 1) // self.block_size
+        for i in range(start_block, end_block):
+            slot_start = seq.block_table[i] * self.block_size
+            if i == start_block: slot_start += start % self.block_size
+            slot_end = (seq.block_table[i] * self.block_size + self.block_size
+                        if i != end_block - 1
+                        else seq.block_table[i] * self.block_size + end - i * self.block_size)
+            slot_mapping.extend(range(slot_start, slot_end))
+    if cu_seqlens_k[-1] > cu_seqlens_q[-1]:                          # ⑦ prefix cache?
+        block_tables = self.prepare_block_tables(seqs)
+    # ⑧ 张量创建 (int64/id_pos, int32/cu_slot) + set_context(True,...) → return
+```
+
+<div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+<div v-click="1" class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
+  <strong>⑥ slot_mapping</strong><br/>按 block 批量计算 slot 范围。首/末 block 处理偏移和余量，通过 <code>extend(range(...))</code> 收集。
 </div>
+<div v-click="2" class="p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r">
+  <strong>⑦ prefix cache 判断</strong><br/>K 侧 > Q 侧时触发 <code>prepare_block_tables</code>，将 block_table 传递给 attention。
+</div>
+<div v-click="3" class="p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r">
+  <strong>⑧ 张量创建 + set_context</strong><br/>int64 用于 ids/pos，int32 用于 cu/slot。调用 <code>set_context(True, ...)</code> 注入后返回。
+</div>
+</div>
+
+<!-- prepare_prefill 下半部分：slot_mapping 按 block 计算 + prefix cache 判断 + 张量创建 + set_context。 -->
 
 <!-- prepare_prefill 完整流程八步总览：初始化→主循环→slot_mapping→prefix cache→张量→Context→返回。 -->
 

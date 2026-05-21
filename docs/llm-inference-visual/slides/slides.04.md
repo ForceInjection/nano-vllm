@@ -521,11 +521,7 @@ def allocate(self, seq: Sequence, num_cached_blocks: int):
 ```
 
 <div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  两步分配：① 复用 <code>can_allocate</code> 返回的 num_cached_blocks 个已有 block（ref_count+1）；② 剩余 block 从 free 池新分配（ref_count=1）。最后设置 <code>num_cached_tokens</code>。
-</div>
-
-<div v-click class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
-  💡 引用计数规则：cached block → ref_count+1（共享）；新 block → ref_count=1（独占）。
+  两步分配：① 复用 <code>can_allocate</code> 返回的 num_cached_blocks 个已有 block（ref_count+1）；② 剩余 block 从 free 池新分配（ref_count=1）。最后设置 <code>num_cached_tokens</code>。引用计数规则：cached → ref_count+1（共享），新 → ref_count=1（独占）。下一页看两种路径的详细对比。
 </div>
 
 <!-- 对应 block_manager.py L75-92，allocate 的两种路径：复用 cached block + 分配新 block -->

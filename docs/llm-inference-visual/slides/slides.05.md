@@ -345,7 +345,7 @@ positions = torch.tensor(positions, dtype=torch.int64)
 layout: default
 ---
 
-# 3.2 cu_seqlens_q 与 cu_seqlens_k 对比
+# 3.2 cu_seqlens_q 与 max_seqlen_q：查询侧变长边界
 
 <div class="grid grid-cols-2 gap-4 mt-3 text-sm">
 <div>
@@ -392,7 +392,7 @@ K 侧多出 4 个历史 token。cu_k[-1]=9 > cu_q[-1]=5。
 layout: default
 ---
 
-# 3.3 cu_seqlens_k：KV 侧可能更长
+# 3.3 cu_seqlens_k 与 max_seqlen_k：键值侧可能更长
 
 <SourceCode file="nanovllm/engine/model_runner.py" lines="132-163" />
 

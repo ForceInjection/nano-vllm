@@ -647,8 +647,7 @@ def deallocate(self, seq: Sequence):
     seq.block_table.clear()
 ```
 
-<div class="mt-3 text-sm">
-
+<div class="mt-3 text-xs">
   <div v-click="1" class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded mb-2">
     <strong>为什么逆序遍历 block_table？</strong><br/>
     越靠后的 block 共享可能性越低，逆序使 ref_count 更早归零。如果正序先处理共享 block（ref_count=2 → 1），不会触发回收，但逻辑同样正确。
@@ -666,54 +665,72 @@ def deallocate(self, seq: Sequence):
 
 ---
 
-# BlockManager 方法调用链总结
+# 方法调用关系：Scheduler → BlockManager
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.55}
-flowchart TD
-    subgraph SCHED["调度器 Scheduler"]
-        S1["schedule()\nprefill 阶段"] --> S2["can_allocate(seq)"]
-        S1 --> S3["allocate(seq, cached)"]
-        S4["schedule()\ndecode 阶段"] --> S5["may_append(seq)"]
-        S6["preempt()"] --> S7["deallocate(seq)"]
-        S8["postprocess()"] --> S9["hash_blocks(seq)"]
+```mermaid {scale: 0.7}
+flowchart LR
+    subgraph SCHED["调度器触发点"]
+        S_pf["prefill"] --> S_ca["can_allocate"]
+        S_pf --> S_al["allocate"]
+        S_de["decode"] --> S_ma["may_append"]
+        S_pr["preempt"] --> S_da["deallocate"]
+        S_po["postprocess"] --> S_hb["hash_blocks"]
     end
-    subgraph BM["BlockManager"]
-        B1["can_allocate"] --> B1a["compute_hash"]
-        B1 --> B1b["hash_to_block_id 查找"]
-        B1 --> B1c["token_ids 碰撞校验"]
-
-        B2["allocate"] --> B2a["ref_count++ (复用)"]
-        B2 --> B2b["_allocate_block (新分配)"]
-
-        B3["hash_blocks"] --> B3a["compute_hash(链式)"]
-        B3 --> B3b["block.update(hash, token_ids)"]
-        B3 --> B3c["登记到 hash_to_block_id"]
-
-        B4["deallocate"] --> B4a["ref_count--"]
-        B4 --> B4b["_deallocate_block (回收)"]
+    subgraph BM["BlockManager 入口"]
+        BM1["can_allocate"]
+        BM2["allocate"]
+        BM3["hash_blocks"]
+        BM4["deallocate"]
     end
-
-    S2 --> B1
-    S3 --> B2
-    S7 --> B4
-    S9 --> B3
-    S5 --> B5["may_append → _allocate_block"]
+    S_ca --> BM1
+    S_al --> BM2
+    S_da --> BM4
+    S_hb --> BM3
+    S_ma --> BM5["_allocate_block"]
 ```
 
 </div>
 
-<div class="mt-2 grid grid-cols-2 gap-2 text-xs">
-<div class="bg-blue-500/10 p-2 rounded text-center">
-  BlockManager 的 4 个主入口方法
-</div>
-<div class="bg-green-500/10 p-2 rounded text-center">
-  全部通过 Scheduler 的 3 个触发点串联
-</div>
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>4 个入口，3 个触发点</strong>：<code>can_allocate</code>/<code>allocate</code>/<code>hash_blocks</code>/<code>deallocate</code> 由 scheduler 的 prefill、preempt、postprocess 三个阶段串联调用。may_append 直接调用 <code>_allocate_block</code> 不经过 allocate。
 </div>
 
-<!-- BlockManager 四个主入口方法与 Scheduler 三个触发点的完整调用链 mermaid 图 -->
+<!-- Scheduler 调度器与 BlockManager 四个主入口的调用关系图 -->
+
+---
+layout: default
+---
+
+# BlockManager 各方法内部实现
+
+<div class="flex justify-center">
+
+```mermaid {scale: 0.65}
+flowchart TD
+    B1["can_allocate"] --> B1a["compute_hash 链式"]
+    B1 --> B1b["hash_to_block_id 查找"]
+    B1 --> B1c["token_ids 全等校验"]
+
+    B2["allocate"] --> B2a["ref_count++ (复用缓存)"]
+    B2 --> B2b["_allocate_block (新分配)"]
+
+    B3["hash_blocks"] --> B3a["compute_hash"]
+    B3 --> B3b["block.update()"]
+    B3 --> B3c["hash_to_block_id 登记"]
+
+    B4["deallocate"] --> B4a["ref_count--"]
+    B4 --> B4b["_deallocate_block"]
+```
+
+</div>
+
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
+  <strong>每个方法的核心子步骤</strong>：can_allocate 依赖哈希链 + 全等校验；allocate 分复用和新分配两条路径；hash_blocks 只登记本轮新完成的完整 block；deallocate 递减引用计数，归零时回收。
+</div>
+
+<!-- BlockManager 各方法内部核心子步骤总结图，前一页展示调用关系，本页展示各方法内部实现 -->
 
 ---
 layout: section

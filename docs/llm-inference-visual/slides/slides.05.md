@@ -609,7 +609,7 @@ layout: default
 
 # Context：模块级全局变量注入
 
-<SourceCode file="nanovllm/utils/context.py" lines="5-27" />
+<SourceCode file="nanovllm/utils/context.py" lines="1-27" />
 
 ```python
 from dataclasses import dataclass
@@ -657,7 +657,7 @@ layout: default
 
 # Context 字段完整清单
 
-<SourceCode file="nanovllm/utils/context.py" lines="5-27" />
+<SourceCode file="nanovllm/utils/context.py" lines="1-27" />
 
 <div class="text-sm">
 

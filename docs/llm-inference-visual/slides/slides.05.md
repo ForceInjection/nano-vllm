@@ -551,20 +551,20 @@ layout: default
     if cu_seqlens_k[-1] > cu_seqlens_q[-1]:                          # ⑦ prefix cache?
         block_tables = self.prepare_block_tables(seqs)
     input_ids = torch.tensor(input_ids, dtype=torch.int64)            # ⑧ 转为张量
-    set_context(True, cu_seqlens_q, cu_seqlens_k, ..., block_tables)  # ⑧ 注入 Context
-    return input_ids, positions                                       # ⑧ 返回
+    set_context(True, cu_seqlens_q, cu_seqlens_k, ..., block_tables)  # 注入 Context
+    return input_ids, positions                                       # 返回
 ```
 
-<div class="mt-3 grid grid-cols-2 gap-2 text-sm">
+<div class="mt-3 grid grid-cols-2 gap-2 text-xs">
 <div v-click="1" class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
   <strong>⑥ slot_mapping</strong><br/>按 block 批量计算 slot 范围。首/末 block 处理偏移和余量，通过 <code>extend(range(...))</code> 收集。
 </div>
 <div v-click="2" class="p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r">
   <strong>⑦ prefix cache 判断</strong><br/>K 侧 > Q 侧时触发 <code>prepare_block_tables</code>，将 block_table 传递给 attention。
 </div>
-<div v-click="3" class="p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r">
-  <strong>⑧ 张量创建 + set_context</strong><br/>int64 用于 ids/pos，int32 用于 cu/slot。调用 <code>set_context(True, ...)</code> 注入后返回。
 </div>
+<div v-click="3" class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-xs">
+  <strong>⑧ 张量创建 + set_context</strong>：int64 用于 ids/pos，int32 用于 cu/slot。调用 <code>set_context(True, ...)</code> 注入后，<code>return input_ids, positions</code>。
 </div>
 
 <!-- prepare_prefill 下半部分：slot_mapping 按 block 计算 + prefix cache 判断 + 张量创建 + set_context。 -->

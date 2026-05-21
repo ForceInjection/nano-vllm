@@ -710,6 +710,8 @@ layout: default
 <div>
 <h4 class="text-sm font-bold mb-1 text-center">can_allocate</h4>
 
+<div class="flex justify-center">
+
 ```mermaid {scale: 0.6}
 flowchart TD
     A["can_allocate"] --> B["compute_hash 链式"]
@@ -719,8 +721,12 @@ flowchart TD
 
 </div>
 
+</div>
+
 <div>
 <h4 class="text-sm font-bold mb-1 text-center">allocate</h4>
+
+<div class="flex justify-center">
 
 ```mermaid {scale: 0.6}
 flowchart TD
@@ -730,8 +736,12 @@ flowchart TD
 
 </div>
 
+</div>
+
 <div>
 <h4 class="text-sm font-bold mb-1 text-center">hash_blocks</h4>
+
+<div class="flex justify-center">
 
 ```mermaid {scale: 0.6}
 flowchart TD
@@ -742,14 +752,20 @@ flowchart TD
 
 </div>
 
+</div>
+
 <div>
 <h4 class="text-sm font-bold mb-1 text-center">deallocate</h4>
+
+<div class="flex justify-center">
 
 ```mermaid {scale: 0.6}
 flowchart TD
     A["deallocate"] --> B["ref_count--"]
     A --> C["_deallocate_block"]
 ```
+
+</div>
 
 </div>
 

@@ -497,15 +497,11 @@ layout: default
 layout: default
 ---
 
-# prepare_prefill 完整代码走读
-
-<SourceCode file="nanovllm/engine/model_runner.py" lines="129-170" />
-
 # prepare_prefill 完整代码走读（上）
 
 <SourceCode file="nanovllm/engine/model_runner.py" lines="129-148" />
 
-```python
+```python {all|2-4|5-9|10-11}
 def prepare_prefill(self, seqs: list[Sequence]):
     input_ids, positions = []                                        # ① 初始化
     cu_seqlens_q, cu_seqlens_k = [0], [0]                           # ① 序列边界
@@ -541,7 +537,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/model_runner.py" lines="149-170" />
 
-```python
+```python {all|1-10|11-12|13}
         if not seq.block_table: continue                             # ⑥ warmup 跳过
         start_block = start // self.block_size                       # ⑥ 逐 block 计算 slot
         end_block = (end + self.block_size - 1) // self.block_size

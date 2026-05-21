@@ -705,26 +705,53 @@ layout: default
 
 # BlockManager 各方法内部实现
 
-<div class="flex justify-center">
+<div class="grid grid-cols-2 gap-4 mt-4">
 
-```mermaid {scale: 0.7}
+<div>
+<h4 class="text-sm font-bold mb-1">can_allocate</h4>
+
+```mermaid {scale: 0.85}
 flowchart TD
-    B1["can_allocate"] --> B1a["compute_hash 链式"]
-    B1 --> B1b["hash_to_block_id 查找"]
-    B1 --> B1c["token_ids 全等校验"]
-
-    B2["allocate"] --> B2a["ref_count++ (复用缓存)"]
-    B2 --> B2b["_allocate_block (新分配)"]
-
-    B3["hash_blocks"] --> B3a["compute_hash"]
-    B3 --> B3b["block.update()"]
-    B3 --> B3c["hash_to_block_id 登记"]
-
-    B4["deallocate"] --> B4a["ref_count--"]
-    B4 --> B4b["_deallocate_block"]
-
-    B1 ~~~ B2 ~~~ B3 ~~~ B4
+    A["can_allocate"] --> B["compute_hash 链式"]
+    A --> C["hash_to_block_id 查找"]
+    A --> D["token_ids 全等校验"]
 ```
+
+</div>
+
+<div>
+<h4 class="text-sm font-bold mb-1">allocate</h4>
+
+```mermaid {scale: 0.85}
+flowchart TD
+    A["allocate"] --> B["ref_count++ (复用)"]
+    A --> C["_allocate_block (新分配)"]
+```
+
+</div>
+
+<div>
+<h4 class="text-sm font-bold mb-1">hash_blocks</h4>
+
+```mermaid {scale: 0.85}
+flowchart TD
+    A["hash_blocks"] --> B["compute_hash"]
+    A --> C["block.update()"]
+    A --> D["hash_to_block_id 登记"]
+```
+
+</div>
+
+<div>
+<h4 class="text-sm font-bold mb-1">deallocate</h4>
+
+```mermaid {scale: 0.85}
+flowchart TD
+    A["deallocate"] --> B["ref_count--"]
+    A --> C["_deallocate_block"]
+```
+
+</div>
 
 </div>
 

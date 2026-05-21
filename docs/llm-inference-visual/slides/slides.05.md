@@ -394,7 +394,7 @@ layout: default
 
 # 3.3 cu_seqlens_k：KV 侧可能更长
 
-<SourceCode file="nanovllm/engine/model_runner.py" lines="162-163" />
+<SourceCode file="nanovllm/engine/model_runner.py" lines="132-163" />
 
 ```python
 # cu_seqlens_k 在 prefix cache 场景下可能大于 cu_seqlens_q
@@ -503,7 +503,7 @@ layout: default
 
 ```python {all|2-4|5-9|10-11}
 def prepare_prefill(self, seqs: list[Sequence]):
-    input_ids, positions = []                                        # ① 初始化
+    input_ids, positions = [], []                                    # ① 初始化
     cu_seqlens_q, cu_seqlens_k = [0], [0]                            # 序列边界
     slot_mapping, block_tables = [], None
     for seq in seqs:
@@ -553,7 +553,8 @@ layout: default
     if cu_seqlens_k[-1] > cu_seqlens_q[-1]:                          # ⑦ prefix cache?
         block_tables = self.prepare_block_tables(seqs)
     input_ids = torch.tensor(input_ids, dtype=torch.int64)            # ⑧ 转为张量
-    set_context(True, cu_seqlens_q, cu_seqlens_k, ..., block_tables)  # 注入 Context
+    set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
+            slot_mapping, None, block_tables)                       # ⑧ 注入 Context
     return input_ids, positions                                       # 返回
 ```
 
@@ -649,7 +650,9 @@ set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
             slot_mapping, None, block_tables)
 
 # ② ModelRunner.run() — model() 触发 Attention (L215-217)
-input_ids, positions = self.prepare_prefill(seqs)   # → 内部调用了 set_context
+input_ids, positions = (self.prepare_prefill(seqs)    # → 内部调用了 set_context
+                          if is_prefill
+                          else self.prepare_decode(seqs))
 logits = self.run_model(input_ids, positions, ...)  # → Attention.forward → get_context()
 
 # ③ ModelRunner.run() 末尾 — reset_context 清空 (L219)
@@ -802,8 +805,8 @@ print(f"positions:      {positions}")      # [0, 1, 2, 0, 1]
 print(f"cu_seqlens_q:   {cu_seqlens_q}")   # [0, 3, 5]
 
 # —— prefix cache 场景 ——
-seqs2 = [([0,1,2], 0, 3), ([10,11,12,13], 2, 2)]
-# positions: [0,1,2, 2,3]  ← seq_b 从 2 开始
+seqs2 = [([0,1,2], 0, 3), ([10,11,12,13], 4, 2)]
+# positions: [0,1,2, 4,5]  ← seq_b 从 4 开始
 ```
 
 <div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">

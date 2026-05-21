@@ -669,7 +669,7 @@ def deallocate(self, seq: Sequence):
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.7}
+```mermaid {scale: 0.65}
 flowchart LR
     subgraph SCHED["调度器触发点"]
         S_pf["prefill"] --> S_ca["can_allocate"]
@@ -707,7 +707,7 @@ layout: default
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.65}
+```mermaid {scale: 0.7}
 flowchart TD
     B1["can_allocate"] --> B1a["compute_hash 链式"]
     B1 --> B1b["hash_to_block_id 查找"]
@@ -722,6 +722,8 @@ flowchart TD
 
     B4["deallocate"] --> B4a["ref_count--"]
     B4 --> B4b["_deallocate_block"]
+
+    B1 ~~~ B2 ~~~ B3 ~~~ B4
 ```
 
 </div>

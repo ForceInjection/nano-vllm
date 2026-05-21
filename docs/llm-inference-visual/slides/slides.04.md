@@ -708,9 +708,9 @@ layout: default
 <div class="grid grid-cols-2 gap-4 mt-4">
 
 <div>
-<h4 class="text-sm font-bold mb-1">can_allocate</h4>
+<h4 class="text-sm font-bold mb-1 text-center">can_allocate</h4>
 
-```mermaid {scale: 0.85}
+```mermaid {scale: 0.6}
 flowchart TD
     A["can_allocate"] --> B["compute_hash 链式"]
     A --> C["hash_to_block_id 查找"]
@@ -720,9 +720,9 @@ flowchart TD
 </div>
 
 <div>
-<h4 class="text-sm font-bold mb-1">allocate</h4>
+<h4 class="text-sm font-bold mb-1 text-center">allocate</h4>
 
-```mermaid {scale: 0.85}
+```mermaid {scale: 0.6}
 flowchart TD
     A["allocate"] --> B["ref_count++ (复用)"]
     A --> C["_allocate_block (新分配)"]
@@ -731,9 +731,9 @@ flowchart TD
 </div>
 
 <div>
-<h4 class="text-sm font-bold mb-1">hash_blocks</h4>
+<h4 class="text-sm font-bold mb-1 text-center">hash_blocks</h4>
 
-```mermaid {scale: 0.85}
+```mermaid {scale: 0.6}
 flowchart TD
     A["hash_blocks"] --> B["compute_hash"]
     A --> C["block.update()"]
@@ -743,9 +743,9 @@ flowchart TD
 </div>
 
 <div>
-<h4 class="text-sm font-bold mb-1">deallocate</h4>
+<h4 class="text-sm font-bold mb-1 text-center">deallocate</h4>
 
-```mermaid {scale: 0.85}
+```mermaid {scale: 0.6}
 flowchart TD
     A["deallocate"] --> B["ref_count--"]
     A --> C["_deallocate_block"]

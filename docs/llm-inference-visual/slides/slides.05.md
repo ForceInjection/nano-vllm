@@ -446,28 +446,6 @@ layout: default
 
 # slot_mapping 公式详解
 
-<SourceCode file="nanovllm/engine/model_runner.py" lines="149-161" />
-
-```python
-slot_mapping = []
-for seq in seqs:
-    start = seq.num_cached_tokens
-    end = start + seq.num_scheduled_tokens
-    if not seq.block_table:    # warmup
-        continue
-    start_block = start // self.block_size
-    end_block = (end + self.block_size - 1) // self.block_size
-    for i in range(start_block, end_block):
-        slot_start = seq.block_table[i] * self.block_size
-        if i == start_block:
-            slot_start += start % self.block_size
-        if i != end_block - 1:
-            slot_end = seq.block_table[i] * self.block_size + self.block_size
-        else:
-            slot_end = seq.block_table[i] * self.block_size + end - i * self.block_size
-        slot_mapping.extend(range(slot_start, slot_end))
-```
-
 <div class="mt-3 text-sm">
 
 **公式三要素：**
@@ -475,14 +453,14 @@ for seq in seqs:
 | 变量 | 含义 | 示例 (block_size=256) |
 |------|------|-----------------------|
 | `i // block_size` | i 所在的 block 序号 | i=512 → 512//256 = 2 |
-| `bt[...]` | 物理 block_id | bt[2]=12 |
-| `i % block_size` | block 内的 offset | 512%256 = 0 |
+| `bt[...]` | 物理 block_id（由 BlockManager 分配） | bt[2]=12 |
+| `i % block_size` | block 内的偏移 | 512%256 = 0 |
 | **slot** | 物理 KV cache 位置 | 12×256+0 = 3072 |
 
 </div>
 
-<div v-click class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
-  ⚠️ <code>bt[i // block_size]</code> 不是简单的 <code>i</code>——block_table 存储的是物理 block_id（由 BlockManager 分配），不是连续的逻辑编号。
+<div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
+  ⚠️ <code>bt[i // block_size]</code> 不是简单的 <code>i</code>——block_table 存储的是物理 block_id，不是连续的逻辑编号。代码见 3.4。
 </div>
 
 <!-- 分步拆解 slot_mapping 公式三要素：block 序号、物理 block_id、块内偏移。 -->
@@ -502,18 +480,14 @@ layout: default
 | token i | i//256 | block_id | offset | slot |
 |---------|--------|----------|--------|------|
 | 10 | 0 | 5 | 10 | 5×256+10 = **1290** |
-| 11 | 0 | 5 | 11 | 5×256+11 = **1291** |
-| ... | 0 | 5 | ... | ... |
 | 255 | 0 | 5 | 255 | 5×256+255 = **1535** |
 | 256 | 1 | 12 | 0 | 12×256+0 = **3072** |
-| 257 | 1 | 12 | 1 | 12×256+1 = **3073** |
-| ... | 1 | 12 | ... | ... |
 | 511 | 1 | 12 | 255 | 12×256+255 = **3327** |
-| 512 | 2 | 8 | 0 | 8×256+0 = **2048** ← block_id 无序跳跃 |
+| 512 | 2 | 8 | 0 | 8×256+0 = **2048** ← 跳跃！ |
 
 </div>
 
-<div v-click class="mt-3 text-sm bg-yellow-500/10 p-3 rounded">
+<div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   <strong>关键发现</strong>：物理 block_id 完全不连续（5→12→8），但 slot 把不连续的物理位置映射为连续的 token 索引——这正是 block_table 存在的意义。
 </div>
 

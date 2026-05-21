@@ -190,9 +190,9 @@ class BlockManager:
     def __init__(self, num_blocks: int, block_size: int):
         self.block_size = block_size
         self.blocks = [Block(i) for i in range(num_blocks)]
+        self.hash_to_block_id: dict[int, int] = {}   # 哈希 → block_id
         self.free_block_ids: deque[int] = deque(range(num_blocks))
         self.used_block_ids: set[int] = set()
-        self.hash_to_block_id: dict[int, int] = {}   # 哈希 → block_id
 ```
 
 <div class="mt-4 grid grid-cols-3 gap-3 text-sm">
@@ -843,7 +843,7 @@ cached_b = bm.can_allocate(seq_b)
 assert cached_b == 2          # 前两块命中
 bm.allocate(seq_b, cached_b)
 assert seq_b.block_table[:2] == seq_a.block_table[:2]  # 共享
-assert bm.blocks[0].ref_count == 2                     # 两个引用
+assert bm.blocks[seq_b.block_table[0]].ref_count == 2  # 两个引用
 ```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">

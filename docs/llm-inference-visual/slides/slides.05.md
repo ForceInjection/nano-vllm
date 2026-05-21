@@ -10,6 +10,8 @@ background: /background.svg
 nano-vllm 实战课程 · 源码拆解 LLM 推理引擎
 </div>
 
+<!-- 封面页：本课主题为 Prefill 批构建与 Context 注入，属于模型执行层的核心环节。 -->
+
 ---
 layout: default
 ---
@@ -49,6 +51,8 @@ layout: default
   L01-L04 覆盖了引擎调度层。L05 进入<strong>模型执行层</strong>：prefill 阶段模型实际"吃进去"的张量长什么样——多个请求被展平拼接成一个大批次。
 </div>
 
+<!-- 展示课程路线图，L05 聚焦 Prefill 批构建——模型实际"吃进去"的张量长什么样。 -->
+
 ---
 layout: default
 ---
@@ -64,6 +68,8 @@ prefill 阶段多个请求如何被编码为一批张量送入 Transformer。
 | 脚本演示 | 10 min | L05_prefill_batching.py 的 4 个 section |
 | 动手练习 | 15 min | 手算 cu_seqlens_q 与 positions |
 | 答疑讨论 | 10 min | 为什么是 1D 展平而不是 2D padding？Context 全局注入的 trade-off |
+
+<!-- 本课分为原理铺垫、代码走读、脚本演示和动手练习四个阶段，共 90 分钟。 -->
 
 ---
 layout: default
@@ -90,12 +96,16 @@ layout: default
 
 </div>
 
+<!-- 三个核心学习目标：展平拼接的原因、cu_seqlens_q/k 的语义、slot_mapping 与 Context 的设计。 -->
+
 ---
 layout: section
 ---
 
 # 2. 原理说明
 ## Self-Attention 与变长批处理
+
+<!-- 进入原理铺垫环节：理解 Self-Attention 机制与变长批处理问题。 -->
 
 ---
 layout: default
@@ -104,6 +114,8 @@ layout: default
 # 2.1 Self-Attention 为什么需要看所有 token
 
 注意力机制让每个 token "看到"序列中的其他 token：
+
+<div class="flex justify-center">
 
 ```mermaid {scale: 0.65}
 flowchart LR
@@ -117,6 +129,7 @@ flowchart LR
     end
 ```
 
+</div>
 <div v-click class="mt-3 text-sm">
 
 - **Q（Query）**：每个 token 问"谁和我相关？"
@@ -126,6 +139,8 @@ flowchart LR
 
 </div>
 
+<!-- 用 Q/K/V 的比喻解释注意力机制：每个 token 通过 Q 查询、K 匹配、V 加权来融合上下文信息。 -->
+
 ---
 layout: default
 ---
@@ -133,6 +148,8 @@ layout: default
 # 2.2 为什么 prefill 需要变长边界
 
 多个不等长请求展平拼接时，需要 `cu_seqlens` 标记边界，防止请求 A 的 token 错误地"看到"请求 B：
+
+<div class="flex justify-center">
 
 ```mermaid {scale: 0.7}
 flowchart TD
@@ -153,15 +170,18 @@ flowchart TD
     FLAT --> CU
 ```
 
-<div v-click class="mt-3 text-sm opacity-80">
+</div>
+<div v-click class="mt-3 text-sm bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r">
   <strong>不这样做的后果</strong>：如果不标记边界，请求 B 的 token 会在注意力计算中「看到」请求 A 的 token——产生错误的语义混合（cross-contamination）。
 </div>
+
+<!-- 不等长请求展平后需要 cu_seqlens 标记边界，否则产生 cross-contamination。 -->
 
 ---
 layout: default
 ---
 
-# 2.3 为什么是 1D 展平而不是 2D padding？
+# 为什么是 1D 展平而不是 2D padding？
 
 | 方案 | 优点 | 缺点 |
 |------|------|------|
@@ -172,6 +192,8 @@ layout: default
   <strong>举例</strong>：A 有 1024 token，B 有 8 token。2D padding 需要 (2, 1024) 矩阵，其中 1016 个位置是无效的 padding token。1D 展平只需要 1032 个有效位置。FlashAttention 的 <code>varlen</code> API 原生支持这种变长格式。
 </div>
 
+<!-- 对比 1D 展平和 2D padding，1D 展平零浪费但需要变长注意力算子支持。 -->
+
 ---
 layout: section
 ---
@@ -179,11 +201,15 @@ layout: section
 # 3. 代码走读
 ## prepare_prefill 的六大步
 
+<!-- 进入代码走读环节，跟踪 prepare_prefill 的六大步骤：从 Sequence 列表到批张量的完整流程。 -->
+
 ---
 layout: default
 ---
 
 # prepare_prefill 全景图
+
+<div class="flex justify-center">
 
 ```mermaid {scale: 0.58}
 flowchart TD
@@ -199,6 +225,9 @@ flowchart TD
     H & I & J --> K["set_context(...) → Attention 可用"]
 ```
 
+</div>
+<!-- 先看全景图建立全局印象：六步将 Sequence 列表转换为批张量并注入 Context。 -->
+
 ---
 layout: default
 ---
@@ -208,42 +237,48 @@ layout: default
 <SourceCode file="nanovllm/engine/model_runner.py" lines="129-148" />
 
 ```python
-input_ids_list = []
-positions_list = []
+input_ids = []
+positions = []
 cu_seqlens_q = [0]
 
 for seq in seqs:
     start = seq.num_cached_tokens
     end = start + seq.num_scheduled_tokens
-    input_ids_list.append(seq.token_ids[start:end])         # 取出区间
-    positions_list.append(list(range(start, end)))          # 位置编码
-    cu_seqlens_q.append(cu_seqlens_q[-1] + (end - start))  # 累积长度
+    input_ids.extend(seq[start:end])                          # 取出区间
+    positions.extend(range(start, end))                       # 位置编码
+    cu_seqlens_q.append(cu_seqlens_q[-1] + (end - start))    # 累积长度
 
-input_ids = torch.tensor(input_ids_list, dtype=torch.int32)    # 1D!
-positions = torch.tensor(positions_list, dtype=torch.int32)    # 1D!
-cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32)  # [bs+1]
+input_ids = torch.tensor(input_ids, dtype=torch.int64)        # 1D!
+positions = torch.tensor(positions, dtype=torch.int64)        # 1D!
+cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32) # [bs+1]
 ```
+
+<div v-click class="mt-2 text-sm bg-green-500/10 border-l-3 border-green-500 rounded-r">
+  <strong>三步总览</strong>：① 截取 token 区间 extend 到列表 → ② 生成绝对位置 range(start, end) → ③ 累积 cu_seqlens_q 前缀和。input_ids/positions 转为 int64 张量，cu_seqlens_q 转为 int32 张量。
+</div>
 
 <div v-click class="mt-2 text-sm">
   <code>num_cached_tokens</code> 和 <code>num_scheduled_tokens</code> 由调度器设定，决定本轮处理 prompt 的哪一段。prefix cache 场景下 start > 0。
 </div>
 
+<!-- input_ids 和 positions 的展平拼接逻辑：遍历 seqs，截取 [start, end) 区间，拼接为 1D 张量。 -->
+
 ---
 layout: default
 ---
 
-# 3.1a input_ids 拼接详解
+# input_ids 拼接详解
 
 <SourceCode file="nanovllm/engine/model_runner.py" lines="129-148" />
 
 ```python
-input_ids_list = []
+input_ids = []
 for seq in seqs:
     start = seq.num_cached_tokens
     end = start + seq.num_scheduled_tokens
-    input_ids_list.append(seq.token_ids[start:end])
+    input_ids.extend(seq[start:end])
 
-input_ids = torch.tensor(input_ids_list, dtype=torch.int32)  # 展平 → 1D
+input_ids = torch.tensor(input_ids, dtype=torch.int64)  # 展平 → 1D
 ```
 
 <div class="mt-3 text-sm">
@@ -263,20 +298,22 @@ input_ids = torch.tensor(input_ids_list, dtype=torch.int32)  # 展平 → 1D
   ⚠️ <strong>易错点</strong>：start 是 num_cached_tokens，而不是简单的 seq 索引。当 prefix cache 命中，seq B 的 start=2，跳过了 token_ids 前 2 个 token。
 </div>
 
+<!-- 用具体示例展示 input_ids 如何从两个不等长请求展平成 1D 张量。注意 prefix cache 下 seq B 的 start=2。 -->
+
 ---
 layout: default
 ---
 
-# 3.1b positions 计算详解
+# positions 计算详解
 
 ```python
-positions_list = []
+positions = []
 for seq in seqs:
     start = seq.num_cached_tokens
     end = start + seq.num_scheduled_tokens
-    positions_list.append(list(range(start, end)))  # ⚡ 不是 0 开始的
+    positions.extend(range(start, end))  # ⚡ 不是 0 开始的
 
-positions = torch.tensor(positions_list, dtype=torch.int32)
+positions = torch.tensor(positions, dtype=torch.int64)
 ```
 
 <div class="mt-3 text-sm">
@@ -297,11 +334,13 @@ positions = torch.tensor(positions_list, dtype=torch.int32)
   <strong>为什么 prefix cache 下 positions 不从 0 开始？</strong>因为 RoPE 编码需要每个 token 知道自己在原始序列中的真实位置——即使前半段已经缓存。如果从 0 开始，RoPE 的旋转角会错位，导致注意力分数异常。
 </div>
 
+<!-- positions 的物理含义是 RoPE 编码所需的绝对位置索引，prefix cache 下起点不为 0。 -->
+
 ---
 layout: default
 ---
 
-# 3.2 cu_seqlens_k：KV 侧可能更长
+# 3.3 cu_seqlens_k：KV 侧可能更长
 
 <SourceCode file="nanovllm/engine/model_runner.py" lines="162-163" />
 
@@ -316,15 +355,21 @@ for seq in seqs:
 need_block_tables = cu_seqlens_k[-1] > cu_seqlens_q[-1]
 ```
 
+<div v-click class="mt-2 text-sm bg-green-500/10 border-l-3 border-green-500 rounded-r">
+  <strong>要点总览</strong>：KV 侧长度 = cached + scheduled。当任一 seq 有缓存历史 token 时，cu_seqlens_k > cu_seqlens_q，触发 block_tables 传递。
+</div>
+
 <div v-click class="mt-3 text-sm">
   <strong>当 prefix cache 命中时</strong>：<code>seqlen_k > seqlen_q</code>——因为 K/V cache 中已存在历史 token 的 KV，但 Query 侧只有本轮新增的 token。此时需要 <code>block_tables</code> 来访问已缓存的 KV。
 </div>
+
+<!-- cu_seqlens_k 在 prefix cache 场景下 > cu_seqlens_q，触发 block_tables 传递用于读取历史 KV。 -->
 
 ---
 layout: default
 ---
 
-# 3.2a cu_seqlens 对比：有/无 prefix cache
+# cu_seqlens 对比：有/无 prefix cache
 
 <div class="grid grid-cols-2 gap-4 mt-3 text-sm">
 <div>
@@ -365,11 +410,13 @@ K 侧多出 4 个历史 token。cu_k[-1]=9 > cu_q[-1]=5。
   <strong>对 attention 的影响</strong>：seq_b 的注意力矩阵形状是 (2, 6) 而非 (2, 2)——因为 Q 只有 2 个新 token，但 K/V 需读取全部 6 个（4 个缓存 + 2 个新）。
 </div>
 
+<!-- 左右对比有/无 prefix cache 时 cu_seqlens_q 和 cu_seqlens_k 的差异，注意力矩阵形状因此不同。 -->
+
 ---
 layout: default
 ---
 
-# 3.3 slot_mapping：逻辑 token → 物理 KV 位置
+# 3.4 slot_mapping：逻辑 token → 物理 KV 位置
 
 <SourceCode file="nanovllm/engine/model_runner.py" lines="149-161" />
 
@@ -378,24 +425,38 @@ slot_mapping = []
 for seq in seqs:
     start = seq.num_cached_tokens
     end = start + seq.num_scheduled_tokens
-    bt = seq.block_table
-    for i in range(start, end):
-        block_id = bt[i // self.block_size]        # 第几个 block
-        offset = i % self.block_size               # block 内的偏移
-        slot_mapping.append(block_id * self.block_size + offset)
+    if not seq.block_table:    # warmup
+        continue
+    start_block = start // self.block_size
+    end_block = (end + self.block_size - 1) // self.block_size
+    for i in range(start_block, end_block):
+        slot_start = seq.block_table[i] * self.block_size
+        if i == start_block:
+            slot_start += start % self.block_size
+        if i != end_block - 1:
+            slot_end = seq.block_table[i] * self.block_size + self.block_size
+        else:
+            slot_end = seq.block_table[i] * self.block_size + end - i * self.block_size
+        slot_mapping.extend(range(slot_start, slot_end))
 
 slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32)
 ```
+
+<div v-click class="mt-2 text-sm bg-green-500/10 border-l-3 border-green-500 rounded-r">
+  <strong>两步总览</strong>：① 按 block 批量计算 slot 范围 range(slot_start, slot_end) → ② 收集为 int32 张量。每 token 的 slot 标识其在 KV cache 中的物理写入位置。
+</div>
 
 <div v-click class="mt-3 text-sm">
   <strong>公式</strong>：<code>slot = block_table[i // block_size] * block_size + i % block_size</code>。第 0 个 token 可能写在物理 block 7 的位置 0 → slot = 7 × 256 + 0 = 1792。
 </div>
 
+<!-- slot_mapping 通过 block_table 将逻辑 token 索引映射到物理 KV cache slot。 -->
+
 ---
 layout: default
 ---
 
-# 3.3a slot_mapping 公式详解
+# slot_mapping 公式详解
 
 <SourceCode file="nanovllm/engine/model_runner.py" lines="149-161" />
 
@@ -404,11 +465,19 @@ slot_mapping = []
 for seq in seqs:
     start = seq.num_cached_tokens
     end = start + seq.num_scheduled_tokens
-    bt = seq.block_table
-    for i in range(start, end):
-        block_id = bt[i // self.block_size]
-        offset = i % self.block_size
-        slot_mapping.append(block_id * self.block_size + offset)
+    if not seq.block_table:    # warmup
+        continue
+    start_block = start // self.block_size
+    end_block = (end + self.block_size - 1) // self.block_size
+    for i in range(start_block, end_block):
+        slot_start = seq.block_table[i] * self.block_size
+        if i == start_block:
+            slot_start += start % self.block_size
+        if i != end_block - 1:
+            slot_end = seq.block_table[i] * self.block_size + self.block_size
+        else:
+            slot_end = seq.block_table[i] * self.block_size + end - i * self.block_size
+        slot_mapping.extend(range(slot_start, slot_end))
 ```
 
 <div class="mt-3 text-sm">
@@ -428,11 +497,13 @@ for seq in seqs:
   ⚠️ <code>bt[i // block_size]</code> 不是简单的 <code>i</code>——block_table 存储的是物理 block_id（由 BlockManager 分配），不是连续的逻辑编号。
 </div>
 
+<!-- 分步拆解 slot_mapping 公式三要素：block 序号、物理 block_id、块内偏移。 -->
+
 ---
 layout: default
 ---
 
-# 3.3b slot_mapping 示例走读
+# slot_mapping 示例走读
 
 <div class="text-sm">
 
@@ -458,114 +529,133 @@ layout: default
   <strong>关键发现</strong>：物理 block_id 完全不连续（5→12→8），但 slot 把不连续的物理位置映射为连续的 token 索引——这正是 block_table 存在的意义。
 </div>
 
+<!-- 用 token 10-38 的实际示例逐行推算 slot_mapping，展示物理 block_id 的不连续性。 -->
+
 ---
 layout: default
 ---
 
-# 3.3c prepare_prefill 完整代码走读（上）
+# prepare_prefill 完整代码走读（上）
 
-<SourceCode file="nanovllm/engine/model_runner.py" lines="120-160" />
+<SourceCode file="nanovllm/engine/model_runner.py" lines="129-148" />
 
 ```python
 def prepare_prefill(self, seqs: list[Sequence]):
-    input_ids_list = []
-    positions_list = []
+    input_ids = []
+    positions = []
     cu_seqlens_q = [0]
+    cu_seqlens_k = [0]
+    max_seqlen_q = 0
+    max_seqlen_k = 0
     slot_mapping = []
-    block_tables_list = []
-
-    for seq in seqs:                                      # ← 遍历每个 seq
+    block_tables = None
+    for seq in seqs:
         start = seq.num_cached_tokens
-        end = start + seq.num_scheduled_tokens
-
-        input_ids_list.append(seq.token_ids[start:end])   # ① token 区间
-        positions_list.append(list(range(start, end)))    # ② 绝对位置
-
-        cu_seqlens_q.append(cu_seqlens_q[-1] + (end - start))  # ③ 前缀和
-
-        bt = seq.block_table
-        for i in range(start, end):                       # ④ 每个 token 算 slot
-            block_id = bt[i // self.block_size]
-            offset = i % self.block_size
-            slot_mapping.append(block_id * self.block_size + offset)
-
-        block_tables_list.append(bt)                      # ⑤ 收集 block_table
+        seqlen_q = seq.num_scheduled_tokens
+        end = start + seqlen_q
+        seqlen_k = end
+        input_ids.extend(seq[start:end])
+        positions.extend(range(start, end))
+        cu_seqlens_q.append(cu_seqlens_q[-1] + seqlen_q)
+        cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
+        max_seqlen_q = max(seqlen_q, max_seqlen_q)
+        max_seqlen_k = max(seqlen_k, max_seqlen_k)
 ```
 
-<div class="mt-2 text-xs opacity-70">上半部分：收集每 seq 的逐 token 数据。下半部分：拼接为张量 + cu_seqlens_k。</div>
+<div class="mt-2 text-xs opacity-70">上半部分：变量初始化 + 主循环（input_ids/positions/cu_seqlens/max_seqlen）。下半部分：slot_mapping + 张量创建 + prefix cache 判断 + set_context。</div>
+
+<!-- prepare_prefill 上半部分：初始化变量 + 主循环中收集各 seq 的 input_ids、positions、cu_seqlens、max_seqlen。 -->
 
 ---
 layout: default
 ---
 
-# 3.3d prepare_prefill 完整代码走读（下）
+# prepare_prefill 完整代码走读（下）
 
-<SourceCode file="nanovllm/engine/model_runner.py" lines="162-180" />
+<SourceCode file="nanovllm/engine/model_runner.py" lines="149-170" />
 
 ```python
-    # --- 下半部分：拼接为张量 ---
-    input_ids = torch.tensor(input_ids_list, dtype=torch.int32)      # ⑥ 1D 展平
-    positions = torch.tensor(positions_list, dtype=torch.int32)      # ⑦ 1D 展平
-    cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32)    # ⑧ [bs+1]
-
-    # --- cu_seqlens_k：计算 KV 侧长度 ---
-    cu_seqlens_k = [0]
-    for seq in seqs:
-        seqlen_k = seq.num_cached_tokens + seq.num_scheduled_tokens
-        cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
-    cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32)
-
-    need_block_tables = cu_seqlens_k[-1] > cu_seqlens_q[-1]
-
-    # --- block_tables padding（如果需要）---
-    max_len = max(len(bt) for bt in block_tables_list)
-    block_tables = torch.full((len(seqs), max_len), -1, dtype=torch.int32)
-    for i, bt in enumerate(block_tables_list):
-        block_tables[i, :len(bt)] = torch.tensor(bt, dtype=torch.int32)
-
-    slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32)
-
-    # --- Context 注入 ---
-    set_context(is_prefill=True, slot_mapping=slot_mapping,
-                cu_seqlens_q=cu_seqlens_q, cu_seqlens_k=cu_seqlens_k,
-                block_tables=block_tables if need_block_tables else None, ...)
-    return input_ids, positions, slot_mapping
+        if not seq.block_table:    # warmup
+            continue
+        start_block = start // self.block_size
+        end_block = (end + self.block_size - 1) // self.block_size
+        for i in range(start_block, end_block):
+            slot_start = seq.block_table[i] * self.block_size
+            if i == start_block:
+                slot_start += start % self.block_size
+            if i != end_block - 1:
+                slot_end = seq.block_table[i] * self.block_size + self.block_size
+            else:
+                slot_end = seq.block_table[i] * self.block_size + end - i * self.block_size
+            slot_mapping.extend(range(slot_start, slot_end))
+    if cu_seqlens_k[-1] > cu_seqlens_q[-1]:    # prefix cache
+        block_tables = self.prepare_block_tables(seqs)
+    input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
+    positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
+    cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+    cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+    slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
+    set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables)
+    return input_ids, positions
 ```
 
-<div class="mt-2 text-xs opacity-70">⑨→⑪：cu_seqlens_k 可能长于 cu_seqlens_q → 标志位触发 block_tables 传递。⑫：set_context 注入准备就绪。</div>
+<div class="mt-2 text-xs opacity-70">slot_mapping 按 block 批量计算 + prefix cache 判断 → prepare_block_tables + int64/int32 张量创建 + set_context 注入 + 返回 input_ids/positions。</div>
+
+<!-- prepare_prefill 下半部分：slot_mapping 按 block 批量计算 + prefix cache 判断 + 张量创建 + set_context 注入。 -->
 
 ---
 layout: default
 ---
 
-# 3.4 Context：模块级全局变量注入
+# Context：模块级全局变量注入
 
 <SourceCode file="nanovllm/utils/context.py" lines="5-27" />
 
 ```python
-import threading
-_context = threading.local()
+from dataclasses import dataclass
+import torch
 
+
+@dataclass(slots=True)
 class Context:
     is_prefill: bool = False
-    slot_mapping: torch.Tensor | None = None
-    block_tables: torch.Tensor | None = None
-    context_lens: torch.Tensor | None = None
     cu_seqlens_q: torch.Tensor | None = None
     cu_seqlens_k: torch.Tensor | None = None
     max_seqlen_q: int = 0
     max_seqlen_k: int = 0
+    slot_mapping: torch.Tensor | None = None
+    context_lens: torch.Tensor | None = None
+    block_tables: torch.Tensor | None = None
+
+_CONTEXT = Context()
+
+def get_context():
+    return _CONTEXT
+
+def set_context(is_prefill, cu_seqlens_q=None, cu_seqlens_k=None, max_seqlen_q=0, max_seqlen_k=0, slot_mapping=None, context_lens=None, block_tables=None):
+    global _CONTEXT
+    _CONTEXT = Context(is_prefill, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, context_lens, block_tables)
+
+def reset_context():
+    global _CONTEXT
+    _CONTEXT = Context()
 ```
 
-<div v-click class="mt-3 text-sm">
-  <strong>设计原因</strong>：Attention.forward 的标准签名是 <code>(hidden_states, ...)</code>——不改签名就能拿到调度元数据。用 <code>threading.local()</code> 隔离不同线程的请求，避免并发冲突（虽然当前实现是单线程的）。
+<div v-click class="mt-2 text-sm bg-green-500/10 border-l-3 border-green-500 rounded-r">
+  <strong>设计总览</strong>：Context 通过模块级全局变量存储调度元数据，Attention 内部用 get_context() 读取——不改变 forward 签名即可获取 KV cache 写入位置与变长边界。
 </div>
+
+<div v-click class="mt-3 text-sm">
+  <strong>设计原因</strong>：Attention.forward 的标准签名是 <code>(hidden_states, ...)</code>——不改签名就能拿到调度元数据。但注意实际实现用的是模块级全局变量 <code>_CONTEXT</code>，而非 <code>threading.local()</code>。
+</div>
+
+<!-- Context 通过模块级全局变量 _CONTEXT 存储调度元数据，不改变 forward 签名。 -->
 
 ---
 layout: default
 ---
 
-# 3.4a Context 字段完整清单
+# Context 字段完整清单
 
 <SourceCode file="nanovllm/utils/context.py" lines="5-27" />
 
@@ -588,11 +678,13 @@ layout: default
   <strong>核心规律</strong>：prefill 用 cu_seqlens 处理变长批，decode 用 context_lens + block_tables 定位历史 KV。两套机制分工明确，互不重叠。
 </div>
 
+<!-- 完整展示 Context 所有字段在 prefill 和 decode 模式下的设置差异，两套机制分工明确。 -->
+
 ---
 layout: default
 ---
 
-# 3.5 Context 的生命周期
+# Context 的生命周期
 
 ```python
 # ModelRunner.run() 中的使用
@@ -608,32 +700,36 @@ output = self.model(input_ids, positions)  # Attention 内部 get_context()
 reset_context()                              # 清空，防止泄漏到下一步
 ```
 
-<div v-click class="mt-3 text-sm opacity-80">
+<div v-click class="mt-3 text-sm bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
   📍 <strong>关键</strong>：<code>set_context</code> 在每步前注入 → Attention 内部 <code>get_context()</code> 读取 → <code>reset_context</code> 在每步后清空。这个模式是 nano-vllm 最独特的设计之一。
 </div>
+
+<!-- set_context 在每步前注入 → Attention 内部 get_context() 读取 → reset_context 在每步后清空。 -->
 
 ---
 layout: default
 ---
 
-# 3.5a set_context / get_context / reset_context 调用时序
+# set_context / get_context / reset_context 调用时序
+
+<div class="flex justify-center">
 
 ```mermaid {scale: 0.6}
 sequenceDiagram
     participant Runner as ModelRunner.run()
-    participant CTX as threading.local Context
+    participant CTX as Context模块全局变量
     participant Model as Model.forward()
     participant Attn as Attention.forward()
 
     Runner->>CTX: set_context(is_prefill=True, slot_mapping=..., ...)
-    Note over CTX: 写入线程局部变量
+    Note over CTX: 写入模块级全局变量
 
     Runner->>Model: model(input_ids, positions)
     Model->>Attn: attn(hidden_states)
 
-    Attn->>CTX: slot_mapping = get_context("slot_mapping")
-    Attn->>CTX: cu_seqlens_q = get_context("cu_seqlens_q")
-    Attn->>CTX: cu_seqlens_k = get_context("cu_seqlens_k")
+    Attn->>CTX: slot_mapping = get_context().slot_mapping
+    Attn->>CTX: cu_seqlens_q = get_context().cu_seqlens_q
+    Attn->>CTX: cu_seqlens_k = get_context().cu_seqlens_k
     Note over Attn: 若无 Context，Attention 不知道<br/>KV cache 写到哪里、边界在哪里
 
     Attn-->>Model: output
@@ -643,15 +739,18 @@ sequenceDiagram
     Note over CTX: 清空所有字段，<br/>防止泄漏到下一 step
 ```
 
+</div>
 <div v-click class="mt-2 text-sm text-yellow-400">
   ⚠️ 如果忘记 <code>reset_context()</code>，下一步可能读到上一步的过时数据——这是隐式状态传递最大的坑。
 </div>
+
+<!-- 用时序图展示 set_context、get_context、reset_context 的三方协作流程，强调 reset_context 的重要性。 -->
 
 ---
 layout: default
 ---
 
-# 3.5b Prefill vs Decode 张量形状对比表
+# Prefill vs Decode 张量形状对比表
 
 <div class="text-sm">
 
@@ -671,12 +770,16 @@ layout: default
   <strong>核心规律</strong>：prefill 的 batch 维度 = Σscheduled（所有 token 展平），decode 的 batch 维度 = bs（每 seq 恰好 1 个 token）。两种模式共用了 <code>set_context</code> 接口，但注入的字段完全不同。
 </div>
 
+<!-- 对比 prefill 和 decode 模式下各张量形状的差异：prefill 展平为 Σscheduled，decode 为 bs。 -->
+
 ---
 layout: section
 ---
 
 # 4. L05 验证脚本
 ## L05_prefill_batching.py 走读
+
+<!-- 进入验证脚本环节，预览 L05_prefill_batching.py 的 4 个 section。 -->
 
 ---
 layout: default
@@ -708,11 +811,13 @@ layout: default
 </div>
 </div>
 
+<!-- 四宫格概览：cu_seqlens_q、cu_seqlens_k、slot_mapping 和 torch 张量构建四个验证场景。 -->
+
 ---
 layout: default
 ---
 
-# 4.1a §1 详解：cu_seqlens_q 和 positions
+# §1 详解：cu_seqlens_q 和 positions
 
 ```python
 # 模拟两个请求
@@ -742,11 +847,13 @@ seqs2 = [([0,1,2], 0, 3), ([10,11,12,13], 2, 2)]
   <strong>验证要点</strong>：cu_seqlens_q 是前缀和——<code>cu[1]=3</code> 表示 seq_a 有 3 个 token，<code>cu[2]=5</code> 表示前两个 seq 共 5 个 token。positions 在无 cache 时从 0 开始；有 cache 时从 <code>cached</code> 开始。
 </div>
 
+<!-- §1 验证 cu_seqlens_q 和 positions 的计算：无 cache 时 positions 从 0 开始，prefix cache 从 cached 开始。 -->
+
 ---
 layout: default
 ---
 
-# 4.1b §2 详解：cu_seqlens_k > cu_seqlens_q
+# §2 详解：cu_seqlens_k > cu_seqlens_q
 
 ```python
 # seq_b 已有 4 个缓存的 token
@@ -780,6 +887,8 @@ need_bt = cu_seqlens_k[-1] > cu_seqlens_q[-1]  # 9 > 5 → True
   <strong>关键洞察</strong>：need_block_tables 是 per-batch 的标志位——只要 batch 中任一 seq 需要 block_tables，整个 batch 都传递。
 </div>
 
+<!-- §2 验证 need_block_tables 的判断逻辑：cu_seqlens_k > cu_seqlens_q 时触发，告知 flashattention 需要从 block_tables 读取历史 KV。 -->
+
 ---
 layout: default
 ---
@@ -806,6 +915,8 @@ print(f"cu_seqlens: {cu}")         # [0,3,5]
 # seq B 的 positions 从 4 开始，因为前面 4 个 token 已缓存
 ```
 
+<!-- 课堂练习：手写 build_prefill_tensors 函数验证 cu_seqlens 前缀和与 positions 在 prefix cache 场景从 cached 开始的结果。 -->
+
 ---
 layout: default
 ---
@@ -826,11 +937,13 @@ layout: default
   answer="<strong>意味着</strong>：Query 侧只有本轮新增的 token（较短），K/V 侧还包括已缓存的 token（较长）。<code>flash_attn_varlen_func</code> 接受两组 <code>cu_seqlens</code>：<code>cu_seqlens_q</code> 定义 query 边界，<code>cu_seqlens_k</code> 定义 key/value 边界。对于第一个 seq，q 可能只有 488 个 token，而 k 有 1000 个 token——注意力矩阵是 (488, 1000) 而非 (1000, 1000)。这就是为什么 prefix cache 能减少计算量。"
 />
 
+<!-- 课后自测第 1-2 题：1D 展平 vs 2D padding 的 mask 问题，cu_seqlens_q/k 在 prefix cache 下的差异及其对 flash_attn_varlen_func 参数的影响。 -->
+
 ---
 layout: default
 ---
 
-# 4.2 课后自测题（续）
+# 课后自测题（续）
 
 <SelfTest
   id="l05-q3"
@@ -838,6 +951,8 @@ layout: default
   question="3. Context 通过模块级全局变量传递，而不是显式传入 Attention.forward 的参数列表。这种设计有什么优劣？"
   answer="<strong>优点</strong>：不改 Attention.forward 的标准签名（保持与 HuggingFace 等框架的兼容性），所有调度元数据通过隐式上下文传递。<strong>缺点</strong>：隐式依赖使代码更难追踪——不看 <code>set_context</code> 的调用点就不知道 Attention 里 <code>get_context()</code> 返回了什么。模块级全局变量增加了测试的复杂性（每个测试前需要手动 reset_context）。<br>在 nano-vllm 这种教学项目中，隐式上下文减少了样板代码量；在生产级项目中，显式参数传递更可维护。vLLM 也是类似的隐式注入设计——原因是改签名会破坏整个 model forward 的调用链。"
 />
+
+<!-- 课后自测第 3 题：Context 模块级全局变量注入的 trade-off，优点是不改 Attention.forward 签名，缺点是隐式依赖使代码更难以追踪。 -->
 
 ---
 layout: center
@@ -859,3 +974,5 @@ layout: center
 <div class="mt-10">
   <a href="#" class="text-blue-400 hover:underline text-lg">下一课：Decode 与 Block Tables →</a>
 </div>
+
+<!-- 第 5 课总结：掌握 prefill 批构建的六大张量与 Context 注入机制——展平拼接、cu_seqlens、slot_mapping、block_tables、Context 注入。 -->

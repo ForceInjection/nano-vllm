@@ -877,6 +877,10 @@ print(f"cu_seqlens: {cu}")         # [0,3,5]
 # seq B 的 positions 从 4 开始，因为前面 4 个 token 已缓存
 ```
 
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>练习要点</strong>：手写 <code>build_prefill_tensors</code> 函数理解 cu_seqlens 前缀和语义——<code>cu[i]</code> 是前 i 个 seq 的累计 token 数。对比 prefix cache 场景下 positions 从 <code>cached</code> 而非 0 开始的原因。
+</div>
+
 <!-- 课堂练习：手写 build_prefill_tensors 函数验证 cu_seqlens 前缀和与 positions 在 prefix cache 场景从 cached 开始的结果。 -->
 
 ---

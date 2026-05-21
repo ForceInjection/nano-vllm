@@ -117,7 +117,7 @@ layout: default
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.65}
+```mermaid {scale: 0.55}
 flowchart LR
     subgraph QKV["Q / K / V"]
         Q["Query: 「我在找什么」"]
@@ -130,7 +130,7 @@ flowchart LR
 ```
 
 </div>
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-3 text-xs">
 
 - **Q（Query）**：每个 token 问"谁和我相关？"
 - **K（Key）**：每个 token 回答"我能提供这些信息"
@@ -151,7 +151,7 @@ layout: default
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.7}
+```mermaid {scale: 0.65}
 flowchart TD
     subgraph REQA["请求 A: 3 tokens"]
         A1["Hello"] --> A2["world"] --> A3["!"]
@@ -171,7 +171,8 @@ flowchart TD
 ```
 
 </div>
-<div v-click class="mt-3 text-sm bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r">
+
+<div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   <strong>不这样做的后果</strong>：如果不标记边界，请求 B 的 token 会在注意力计算中「看到」请求 A 的 token——产生错误的语义混合（cross-contamination）。
 </div>
 
@@ -226,6 +227,11 @@ flowchart TD
 ```
 
 </div>
+
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>六大步</strong>：遍历 seqs → 逐条收集 ① input_ids ② positions ③ cu_seqlens_q ④ slot_mapping → 拼接为 1D 张量 → ⑤ block_tables padding → ⑥ cu_seqlens_k + set_context 注入。六步完成后 Attention 即可从 Context 读取全部调度元数据。
+</div>
+
 <!-- 先看全景图建立全局印象：六步将 Sequence 列表转换为批张量并注入 Context。 -->
 
 ---

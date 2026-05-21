@@ -650,29 +650,30 @@ layout: default
 
 ```python {all|2-3|4|5-6|7-8}
 def deallocate(self, seq: Sequence):
-    for block_id in reversed(seq.block_table):     # ① 逆序遍历 block_table
+    for block_id in reversed(seq.block_table):       # ① 逆序遍历 block_table
         block = self.blocks[block_id]
-        block.ref_count -= 1                        # ② ref_count 递减
+        block.ref_count -= 1                         # ② ref_count 递减
         if block.ref_count == 0:
             self._deallocate_block(block_id)         # ③ 归零 → 回收
-    seq.num_cached_tokens = 0                       # ④ 重置计数器
-    seq.block_table.clear()                         # ④ 清空 block_table
+    seq.num_cached_tokens = 0                        # ④ 重置计数器
+    seq.block_table.clear()                          # 清空 block_table
 ```
 
 <div class="mt-3 text-xs">
   <div v-click="1" class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded mb-2">
-    <strong>为什么逆序遍历 block_table？</strong><br/>
+    <strong>① 逆序遍历 block_table</strong><br/>
     越靠后的 block 共享可能性越低，逆序使 ref_count 更早归零。如果正序先处理共享 block（ref_count=2 → 1），不会触发回收，但逻辑同样正确。
   </div>
   <div v-click="2" class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded mb-2">
-    <strong>ref_count == 0 才真正回收</strong><br/>
-    <code>_deallocate_block</code> 把 block_id 从 used 移回 free 池。注意：<strong>不删除 hash_to_block_id</strong>——这是 prefix cache 持久化的关键：哈希索引还在，block 的物理内容仍在。
+    <strong>②③ ref_count 递减与回收</strong><br/>
+    ② 每遍历一个 block，<code>ref_count -= 1</code>。<br/>
+    ③ 归零时调用 <code>_deallocate_block</code> 移回 free 池。注意：<strong>不删除 hash_to_block_id</strong>——哈希索引保留，prefix cache 可持久复用。
   </div>
   <div v-click="3" class="p-3 bg-green-500/10 border-l-3 border-green-500 rounded mb-2">
-    <strong>示例</strong>：共享 block 被两个 seq 引用（ref_count=2）。seq_a deallocate → ref_count=1（未释放）。seq_b deallocate → ref_count=0 → 回到 free 池。后续新 seq 如果哈希链匹配，仍可从 hash_to_block_id 找到它——block 的 KV cache 数据不需要重新计算。
+    <strong>示例</strong>：共享 block 被两个 seq 引用（ref_count=2）。seq_a deallocate → ref_count=1（未释放）。seq_b deallocate → ref_count=0 → 回到 free 池。后续新 seq 哈希链匹配，仍可复用——KV 数据不必重算。
   </div>
   <div v-click="4" class="p-3 bg-purple-500/10 border-l-3 border-purple-500 rounded">
-    <strong>循环后清理</strong>：<code>num_cached_tokens = 0</code>，<code>block_table.clear()</code>。seq 回到初始状态，下一轮 schedule 重新走 prefill 恢复。
+    <strong>④ 循环后清理</strong>：<code>num_cached_tokens = 0</code>，<code>block_table.clear()</code>。seq 回到初始状态，下一轮 schedule 重新走 prefill 恢复。
   </div>
 </div>
 

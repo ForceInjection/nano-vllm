@@ -527,7 +527,7 @@ layout: default
 
 <div class="mt-4 text-sm">
 
-| 方面 | 路径 A：复用 cached block | 路径 B：分配新 block |
+| 对比项 | 路径 A：复用 cached block | 路径 B：分配新 block |
 |------|-------------------------|---------------------|
 | 触发条件 | 命中 hash_to_block_id | 未命中或链中断 |
 | ref_count | 递增（共享） | 设为 1（独占） |
@@ -566,7 +566,7 @@ def hash_blocks(self, seq: Sequence):
         self.hash_to_block_id[h] = block.block_id
 ```
 
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   🔑 <strong>只登记完整 block</strong>：最后一个不完整 block 不参与前缀复用——因为它的 token 还不全，哈希值不代表最终内容。这也是为什么 <code>postprocess</code> 在每轮之后调用 <code>hash_blocks</code>。
 </div>
 
@@ -576,41 +576,24 @@ def hash_blocks(self, seq: Sequence):
 layout: default
 ---
 
-
 # hash_blocks：为什么只登记完整 block？
 
-<SourceCode file="nanovllm/engine/block_manager.py" lines="110-120" />
+<div class="mt-4 text-sm">
 
-```python {all|4-5|6-11}
-def hash_blocks(self, seq: Sequence):
-    start = seq.num_cached_tokens // self.block_size
-    end = (seq.num_cached_tokens + seq.num_scheduled_tokens) // self.block_size
-    if start == end: return
-    h = self.blocks[seq.block_table[start - 1]].hash if start > 0 else -1
-    for i in range(start, end):
-        block = self.blocks[seq.block_table[i]]
-        token_ids = seq.block(i)
-        h = self.compute_hash(token_ids, h)
-        block.update(h, token_ids)
-        self.hash_to_block_id[h] = block.block_id
-```
-
-<div class="mt-3 text-sm">
-
-**为什么最后一个不完整 block 不登记？**
-
-</div>
+`hash_blocks` 通过 <code>start</code>/<code>end</code> 范围只处理本轮新填满的 block——最后一个不完整 block 不参与登记：
 
 ```text
-举例：block_size = 4
-seq_a = [1,2,3,4, 5,6,7]       → block0 完整，block1 不完整
-seq_b = [1,2,3,4, 5,6,7,8]     → 前 7 个与 seq_a 相同，但第 8 个不同
+block_size = 4
+seq_a = [1,2,3,4, 5,6,7]       → block0 完整(登记)，block1 不完整(不登记)
+seq_b = [1,2,3,4, 5,6,7,8]     → 前 7 个相同，第 8 个不同
 
-如果登记了 block1 = hash([5,6,7])——seq_b 的 block1 = [5,6,7,8]
-内容不同，即使哈希链计算出来也会因 token_ids != 而跳过。
-更严重：如果 block1 被错误登记，另一个 seq 的 block1 命中后将
-读到 [5,6,7] 的 KV cache，但实际需要 [5,6,7,8]——导致推理结果错误。
+如果登记了 block1 = hash([5,6,7])——seq_b 的 block1 实际是 [5,6,7,8]
+即使哈希链命中也会因 token_ids != 跳过。
+更严重：若被误认为完整 block 复用，解码读到 [5,6,7] 的 KV 但实际
+需要 [5,6,7,8]——导致推理结果错误。
 ```
+
+</div>
 
 <div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   <strong>安全性</strong>：不完整 block 的 KV cache 只有部分 token——如果被误认为完整 block 并复用，解码阶段会读到垃圾数据。hash_blocks 只在 postprocess 中调用，随着解码推进，越来越多的 block 变完整并被登记。<code>start</code>/<code>end</code> 范围通过 <code>num_cached_tokens</code> 与 <code>num_scheduled_tokens</code> 精确界定本轮新填满的 block。

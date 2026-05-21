@@ -369,7 +369,7 @@ need_block_tables = cu_seqlens_k[-1] > cu_seqlens_q[-1]
 layout: default
 ---
 
-# cu_seqlens 对比：有/无 prefix cache
+# 3.2 cu_seqlens_q 与 cu_seqlens_k 对比
 
 <div class="grid grid-cols-2 gap-4 mt-3 text-sm">
 <div>

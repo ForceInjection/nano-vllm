@@ -622,6 +622,10 @@ flowchart LR
 
 </div>
 
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>两步闭环</strong>：Step 1 — 首个请求通过 can_allocate→allocate→hash_blocks 完成分配并登记哈希；Step 2 — 后续请求通过 can_allocate 命中前缀，allocate 复用已有 block（仅对未命中部分新分配），hash_blocks 继续登记新完成的 block。Prefix cache 的价值在 Step 2 体现：省分配、省计算。
+</div>
+
 <!-- 从分配 (can_allocate+allocate) 到回写 (hash_blocks) 的完整流程 mermaid 图 -->
 
 ---

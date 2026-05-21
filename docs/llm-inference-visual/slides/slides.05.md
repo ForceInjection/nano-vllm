@@ -263,8 +263,8 @@ cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32) # [bs+1]
   <strong>三步总览</strong>：① 截取 token 区间 extend 到列表 → ② 生成绝对位置 range(start, end) → ③ 累积 cu_seqlens_q 前缀和。input_ids/positions 转为 int64 张量，cu_seqlens_q 转为 int32 张量。
 </div>
 
-<div v-click class="mt-2 text-sm">
-  <code>num_cached_tokens</code> 和 <code>num_scheduled_tokens</code> 由调度器设定，决定本轮处理 prompt 的哪一段。prefix cache 场景下 start > 0。
+<div v-click class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
+  💡 <code>num_cached_tokens</code> 和 <code>num_scheduled_tokens</code> 由调度器设定，决定本轮处理 prompt 的哪一段。prefix cache 场景下 start > 0。
 </div>
 
 <!-- input_ids 和 positions 的展平拼接逻辑：遍历 seqs，截取 [start, end) 区间，拼接为 1D 张量。 -->

@@ -601,7 +601,7 @@ _CONTEXT = Context()
 ```
 
 <div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>设计总览</strong>：Context 用 <code>@dataclass</code> 定义八个字段，模块级全局变量 <code>_CONTEXT</code> 存储单例。Attention 内部通过 <code>get_context()</code> 读取元数据——不改变 forward 签名。字段清单和 set/reset_context 生命周期见后续两页。
+  <strong>设计总览</strong>：Context 用 <code>@dataclass</code> 定义八个字段，模块级全局变量 <code>_CONTEXT</code> 存储单例。Attention 内部通过 <code>get_context()</code> 读取元数据——不改变 forward 签名。
 </div>
 
 <!-- Context 通过模块级全局变量 _CONTEXT 存储调度元数据，不改变 forward 签名。 -->
@@ -639,16 +639,33 @@ layout: default
 
 # Context 的生命周期
 
+三步模式发生在每次 `step()` 中，但调用分散在两个函数里：
+
+<SourceCode file="nanovllm/engine/model_runner.py" lines="169,214-220" />
+
 ```python
-# prepare_prefill 末尾的调用 (model_runner.py L169)
+# ① prepare_prefill 末尾 — set_context 注入 (L169)
 set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
             slot_mapping, None, block_tables)
-output = self.model(input_ids, positions)  # Attention 内部 get_context()
-reset_context()                              # 清空，防止泄漏到下一步
+
+# ② ModelRunner.run() — model() 触发 Attention (L215-217)
+input_ids, positions = self.prepare_prefill(seqs)   # → 内部调用了 set_context
+logits = self.run_model(input_ids, positions, ...)  # → Attention.forward → get_context()
+
+# ③ ModelRunner.run() 末尾 — reset_context 清空 (L219)
+reset_context()          # 每一步后必须清空，防止泄漏到下一步
 ```
 
-<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
-  📍 <strong>关键</strong>：<code>set_context</code> 在每步前注入 → Attention 内部 <code>get_context()</code> 读取 → <code>reset_context</code> 在每步后清空。这个模式是 nano-vllm 最独特的设计之一。
+<div class="mt-3 grid grid-cols-3 gap-2 text-xs">
+<div v-click="1" class="p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
+  <strong>① set_context</strong><br/>prepare_prefill/prepare_decode 末尾调用。写入线程局部变量，注入全部调度元数据。
+</div>
+<div v-click="2" class="p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r">
+  <strong>② get_context</strong><br/>Attention.forward 内部调用。不改 forward 签名即可获取 slot_mapping、cu_seqlens、block_tables。
+</div>
+<div v-click="3" class="p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r">
+  <strong>③ reset_context</strong><br/>run() 末尾调用。重置为 <code>Context()</code>，防止下一步读到过时数据。
+</div>
 </div>
 
 <!-- set_context 在每步前注入 → Attention 内部 get_context() 读取 → reset_context 在每步后清空。 -->

@@ -259,7 +259,7 @@ positions = torch.tensor(positions, dtype=torch.int64)        # 1D!
 cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32) # [bs+1]
 ```
 
-<div v-click class="mt-2 text-sm bg-green-500/10 border-l-3 border-green-500 rounded-r">
+<div v-click class="mt-2 p-3 text-sm bg-green-500/10 border-l-3 border-green-500 rounded-r">
   <strong>三步总览</strong>：① 截取 token 区间 extend 到列表 → ② 生成绝对位置 range(start, end) → ③ 累积 cu_seqlens_q 前缀和。input_ids/positions 转为 int64 张量，cu_seqlens_q 转为 int32 张量。
 </div>
 
@@ -300,7 +300,7 @@ input_ids = torch.tensor(input_ids, dtype=torch.int64)  # 展平 → 1D
 
 </div>
 
-<div v-click class="mt-2 text-sm text-yellow-400">
+<div v-click class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   ⚠️ <strong>易错点</strong>：start 是 num_cached_tokens，而不是简单的 seq 索引。当 prefix cache 命中，seq B 的 start=2，跳过了 token_ids 前 2 个 token。
 </div>
 

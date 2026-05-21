@@ -51,6 +51,10 @@ PPT 中有但教案中没有独立节的 slide，去掉编号。
 - 不能改变控制流逻辑
 - 简化版代码如果与源码风格不同，优先改为与源码一致
 - `sampling_params=None` 这类会导致 `AttributeError` 的错误严格禁止
+- **禁止用注释代替代码**：`# ⑧ 张量创建...` 这类注释占位符不能替代实码——即使省略细节，也必须展示关键行
+- **禁止用 `...` 省略语义重要的参数**：`set_context(True, ..., block_tables)` 跳过了 `max_seqlen_q/k`、`slot_mapping`、`None` 四个位置参数
+- **禁止编造不存在的机制**：Context 用 `@dataclass` + 模块级单例 `_CONTEXT`，不是 `threading.local()`
+- **`append` vs `extend` 展平陷阱**：`input_ids_list.append(seq[...])` + `torch.tensor(input_ids_list)` 产生锯齿列表，必须用 `extend` 展平
 
 ### 2.2 SourceCode 行号准确
 
@@ -93,6 +97,19 @@ PPT 中有但教案中没有独立节的 slide，去掉编号。
 正例：<strong>① 命中后：共享 vs 重新取出</strong>  ← 以首个编号定位，其余在内容中独立说明
 ```
 
+### 2.6 元组解包陷阱
+
+`a, b = []` 尝试从空列表解包两个值 → `ValueError`。必须写成 `a, b = [], []`。
+
+```text
+反例：input_ids, positions = []         ← ValueError: not enough values to unpack
+正例：input_ids, positions = [], []     ← 两个独立空列表
+```
+
+### 2.7 函数调用不省略语义重要的参数
+
+`set_context(True, ..., block_tables)` 中的 `...` 跳过了 `max_seqlen_q`、`max_seqlen_k`、`slot_mapping`、`None`（context_lens）四个参数。这些参数在源码中都是位置参数，省略会误导读者对调用签名的理解。
+
 ### 2.5 集合类型与构造函数参数准确性
 
 代码块中的类型标注（`set` vs `deque`）、构造函数参数（`Block(i)` vs `Block(i, block_size)`）必须与源码一致。即使是"概念示意"代码，也不能使用与源码不兼容的类型。
@@ -134,6 +151,20 @@ PPT 中有但教案中没有独立节的 slide，去掉编号。
 ### 3.1 适用范围
 
 代码+信息框模式不仅适用于 §3（代码走读），**§4 验证脚本中的代码页同样适用**。任何包含可运行代码的 slide 都应配绿色总览框。
+
+### 3.2 拆分代码页的动画联动
+
+当一个方法被拆分到两页时，每页使用 `{all|...}` 代码动画 + `v-click` 信息框联动：
+
+```text
+代码块 (```python {all|2-4|5-9|10-11} )
+  ↓
+🟦 2-col grid: 两个 v-click 信息框（前两步）
+  ↓
+🟩 full-width: 最后一个 v-click 信息框横跨全宽
+```
+
+每个动画步对应一个信息框出现。最后一步如果内容较多，可以跨两列全宽展示。
 
 ---
 
@@ -342,5 +373,10 @@ Slidev 项目的 linter 可能在构建时自动修改无关文件（如 slides.
 - [ ] 单页代码 ≤15 行？
 - [ ] 单页表格 ≤1 张？
 - [ ] 无 `opacity-*` 淡化的关键文字？
+- [ ] 无注释 `# ⑧ ...` 代替实码？无 `...` 省略语义重要参数？
+- [ ] 无元组解包 `a, b = []` 崩溃写法？
+- [ ] 无编造的机制（threading.local 等）？
+- [ ] 拆分代码页的动画步与 v-click 信息框一一对应？
+- [ ] §1 详解代码输出与脚本实际输出一致？
 - [ ] 提交前回退了 linter 对无关文件的修改？
 - [ ] 构建通过（`npx slidev build --base ./`）？

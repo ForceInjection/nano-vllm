@@ -567,9 +567,7 @@ layout: default
 
 # Context 字段完整清单
 
-<SourceCode file="nanovllm/utils/context.py" lines="1-27" />
-
-<div class="text-sm">
+<div class="text-xs">
 
 | 字段 | 类型 | prefill 设置 | decode 设置 | 用途 |
 |------|------|:---:|:---:|------|
@@ -584,7 +582,7 @@ layout: default
 
 </div>
 
-<div v-click class="mt-3 text-sm bg-blue-500/10 p-3 rounded">
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-xs">
   <strong>核心规律</strong>：prefill 用 cu_seqlens 处理变长批，decode 用 context_lens + block_tables 定位历史 KV。两套机制分工明确，互不重叠。
 </div>
 

@@ -846,6 +846,10 @@ assert seq_b.block_table[:2] == seq_a.block_table[:2]  # 共享
 assert bm.blocks[0].ref_count == 2                     # 两个引用
 ```
 
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>§1</strong> 验证链式哈希 ≠ 直接哈希（前缀参与计算）；<strong>§2</strong> 验证 can_allocate 命中 2 blocks → block_table 前两项共享 → ref_count=2。与 <a href="#">3.3 can_allocate</a> 中的命中场景示例一致。
+</div>
+
 <!-- §1 哈希链构造 + §2 can_allocate 命中的代码示例和断言 -->
 
 ---

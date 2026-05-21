@@ -68,20 +68,39 @@ PPT 中有但教案中没有独立节的 slide，去掉编号。
 3. **每个动画步只覆盖该编号的逻辑范围**——不吞并相邻步骤的代码，不漏掉本步骤的 break/return
 4. 底部信息框的编号与代码注释编号一一对应
 
-````text
+```text
 反例：{all|5-7|8-11|12-14} ← 5-7 覆盖了②的起始行，12-14 漏了break行
 正例：{all|5-6|7-13|14-15} ← 每个编号精确覆盖自己的 if+break/results
-````
+```
 
 #### 2.3.1 动画步的"最小逻辑单元"原则
 
 每个编号对应一个不可再分的逻辑动作，动画范围应恰好覆盖该动作：
 
-| 代码模式 | 动画范围 | 说明 |
-|---------|:---:|------|
-| `if cond: / break` | 2 行（if+break） | 一个退出条件 = 判断 + 退出 |
-| `if cond: / action / else: / alt` | 整个 if/else 块 | 完整判断分支 |
-| `return ...` | 从 return 行到结束 | 不包含上一步的 append |
+| 代码模式                          |      动画范围      | 说明                       |
+| --------------------------------- | :----------------: | -------------------------- |
+| `if cond: / break`                |  2 行（if+break）  | 一个退出条件 = 判断 + 退出 |
+| `if cond: / action / else: / alt` |  整个 if/else 块   | 完整判断分支               |
+| `return ...`                      | 从 return 行到结束 | 不包含上一步的 append      |
+| for 循环体（多行）                 |   整个循环体范围   | 包括 for header + 所有 body 行 |
+
+#### 2.3.2 信息框标题不合并编号
+
+代码注释中 ①②③④ 各自独立，信息框标题也应对应独立编号，**禁止**用 "①② xxx" 这种合并写法。
+
+```text
+反例：<strong>①② used_block_ids 检查</strong>  ← 合并了两个编号，读者困惑
+正例：<strong>① 命中后：共享 vs 重新取出</strong>  ← 以首个编号定位，其余在内容中独立说明
+```
+
+### 2.5 集合类型与构造函数参数准确性
+
+代码块中的类型标注（`set` vs `deque`）、构造函数参数（`Block(i)` vs `Block(i, block_size)`）必须与源码一致。即使是"概念示意"代码，也不能使用与源码不兼容的类型。
+
+```text
+反例：self.free_block_ids: set[int] = set(range(num_blocks))  ← 源码用 deque，popleft 不兼容
+正例：self.free_block_ids: deque[int] = deque(range(num_blocks))
+```
 
 ### 2.4 变量名一致性
 
@@ -111,6 +130,10 @@ PPT 中有但教案中没有独立节的 slide，去掉编号。
   ↓
 🟡 黄色框：关键要点的人话总结（可选）
 ```
+
+### 3.1 适用范围
+
+代码+信息框模式不仅适用于 §3（代码走读），**§4 验证脚本中的代码页同样适用**。任何包含可运行代码的 slide 都应配绿色总览框。
 
 ---
 
@@ -160,13 +183,7 @@ PPT 中有但教案中没有独立节的 slide，去掉编号。
 ### 6.1 Mermaid 图居中与闭合
 
 ````html
-<div class="flex justify-center">
-
-```mermaid {scale: 0.7}
-...
-```
-
-</div>
+<div class="flex justify-center">```mermaid {scale: 0.7} ... ```</div>
 ````
 
 **关键**：mermaid 代码块的闭合 ` ``` ` **必须在 `</div>` 之前**，否则 Vue 编译器报 `Element is missing end tag`。
@@ -183,6 +200,42 @@ PPT 中有但教案中没有独立节的 slide，去掉编号。
 ### 6.3 概念聚焦页
 
 概念聚焦页（如 "概念 1：Chunked Prefill"）不编号，标题直接描述概念。
+
+### 6.4 隐形边强制纵向排列
+
+当 mermaid 图中多个独立根节点被默认排成一行（横向过宽）时，用 `~~~` 隐形边将它们链成纵向：
+
+```mermaid
+flowchart TD
+    A --> A1
+    B --> B1
+    C --> C1
+    A ~~~ B ~~~ C        ← 强制 A→B→C 纵向排列
+```
+
+### 6.5 2×2 网格展示多个小图
+
+当需要并排展示多个独立的小型 mermaid 图时，使用 `grid grid-cols-2`：
+
+```html
+<div class="grid grid-cols-2 gap-4 mt-4">
+<div>
+<h4 class="text-sm font-bold mb-1 text-center">方法名</h4>
+<div class="flex justify-center">
+
+```mermaid {scale: 0.85}
+flowchart TD
+    A["入口"] --> B["步骤1"]
+    A --> C["步骤2"]
+```
+
+</div>
+</div>
+<!-- 重复 4 次组成 2×2 -->
+</div>
+```
+
+每个格子内 mermaid 用小 scale（0.85），标题 `text-center` 居中。
 
 ---
 
@@ -228,6 +281,15 @@ PPT 中有但教案中没有独立节的 slide，去掉编号。
 - 两张结构不同但都窄于半宽的表
 - 不适合列数多、文字长的表
 
+### 8.4 去掉冗余代码块
+
+解释页（如 "为什么只登记完整 block？"）不应重复展示上一页已有的完整代码。去掉冗余代码块，只保留解释性文字和关键示例。
+
+```text
+反例：hash_blocks 解释页重复展示与 3.5 完全相同的 11 行代码 + 例子 → 22 行溢出
+正例：用一行文字引用 start/end 机制 + 例子 + 安全说明 → 12 行
+```
+
 ---
 
 ## 9. 构建与提交
@@ -244,6 +306,7 @@ npx slidev build --base ./
 构建通过（`✓ built in X.XXs`）才能提交。构建失败则修复后重新构建。
 
 常见构建失败原因：
+
 - Mermaid 代码块 ` ``` ` 闭合缺失 → `Element is missing end tag`
 - HTML 标签未闭合
 - 动画标记行号超出代码块实际行数
@@ -251,6 +314,10 @@ npx slidev build --base ./
 ### 9.2 构建命令路径
 
 构建必须在 `docs/llm-inference-visual/slides/` 目录下执行（`package.json` 所在目录），从仓库根目录执行会报 404。
+
+### 9.3 提交前回退无关修改
+
+Slidev 项目的 linter 可能在构建时自动修改无关文件（如 slides.01.md 的对齐空格）。提交前用 `git checkout <unrelated-file>` 回退这些修改，只保留目标文件的改动。
 
 ---
 
@@ -262,14 +329,18 @@ npx slidev build --base ./
 - [ ] 代码与源文件一致？（变量名、控制流、行号）
 - [ ] 代码块间变量名一致？（无相同变量用不同名称）
 - [ ] SourceCode 行号覆盖展示代码？
-- [ ] 动画标记 `{all|...}` 行数正确、每个编号范围精确？
+- [ ] 动画标记 `{all|...}` 行数正确、每个编号范围精确（含最小逻辑单元）？
 - [ ] 代码注释编号每个只出现一次？
+- [ ] 信息框标题不合并编号（无 "①② xxx" 写法）？
 - [ ] 信息框与代码注释编号对应？
 - [ ] 演讲注释描述的是当前 slide？
 - [ ] 内容在第 3/4 节之间无重复？
 - [ ] Mermaid 图居中、闭合 ` ``` ` 在 `</div>` 之前？
+- [ ] 多个独立根节点的 mermaid 是否用 `~~~` 强制纵向排列？
 - [ ] 复杂流程图是否拆分为多张子图（≤12 节点）？
+- [ ] 解释页是否去掉了上一页已有的冗余代码？
 - [ ] 单页代码 ≤15 行？
 - [ ] 单页表格 ≤1 张？
 - [ ] 无 `opacity-*` 淡化的关键文字？
+- [ ] 提交前回退了 linter 对无关文件的修改？
 - [ ] 构建通过（`npx slidev build --base ./`）？

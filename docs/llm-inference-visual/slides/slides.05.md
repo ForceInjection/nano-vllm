@@ -423,36 +423,10 @@ layout: default
 
 # 3.4 slot_mapping：逻辑 token → 物理 KV 位置
 
-<SourceCode file="nanovllm/engine/model_runner.py" lines="149-161" />
+slot_mapping 将每个 token 的**逻辑位置**（在序列中的第几个 token）映射为 **KV cache 的物理 slot**（显存中的哪个位置）：
 
-```python
-slot_mapping = []
-for seq in seqs:
-    start = seq.num_cached_tokens
-    end = start + seq.num_scheduled_tokens
-    if not seq.block_table:    # warmup
-        continue
-    start_block = start // self.block_size
-    end_block = (end + self.block_size - 1) // self.block_size
-    for i in range(start_block, end_block):
-        slot_start = seq.block_table[i] * self.block_size
-        if i == start_block:
-            slot_start += start % self.block_size
-        if i != end_block - 1:
-            slot_end = seq.block_table[i] * self.block_size + self.block_size
-        else:
-            slot_end = seq.block_table[i] * self.block_size + end - i * self.block_size
-        slot_mapping.extend(range(slot_start, slot_end))
-
-slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32)
-```
-
-<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>两步总览</strong>：① 按 block 批量计算 slot 范围 range(slot_start, slot_end) → ② 收集为 int32 张量。每 token 的 slot 标识其在 KV cache 中的物理写入位置。
-</div>
-
-<div v-click class="mt-3 text-sm">
-  <strong>公式</strong>：<code>slot = block_table[i // block_size] * block_size + i % block_size</code>。第 0 个 token 可能写在物理 block 7 的位置 0 → slot = 7 × 256 + 0 = 1792。
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>核心公式</strong>：<code>slot = block_table[i // block_size] * block_size + i % block_size</code>。逐 block 计算 slot 范围，收集为 int32 张量。例：第 0 个 token 可能写在物理 block 7 的位置 0 → slot = 7 × 256 + 0 = 1792。下一页看完整代码走读。
 </div>
 
 <!-- slot_mapping 通过 block_table 将逻辑 token 索引映射到物理 KV cache slot。 -->

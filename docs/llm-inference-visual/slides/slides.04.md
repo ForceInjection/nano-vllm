@@ -388,20 +388,20 @@ def can_allocate(self, seq: Sequence) -> int:
 <div class="mt-3 text-sm">
 
   <div class="grid grid-cols-2 gap-2">
-  <div class="bg-blue-500/10 p-2 rounded">
+  <div v-click="1" class="bg-blue-500/10 p-2 rounded">
     <strong>① h = -1</strong> 首块无前缀<br/>
     <strong>② seq.block(i)</strong> 从 token_ids 中切片取第 i 个 block 的 token
   </div>
-  <div class="bg-blue-500/10 p-2 rounded">
+  <div v-click="3" class="bg-blue-500/10 p-2 rounded">
     <strong>③ 链式计算</strong> 前一块的哈希作为 seed 参与当前块的哈希计算<br/>
     <strong>④ hash_to_block_id</strong> 内容寻址——O(1) 查找
   </div>
   </div>
-  <div class="mt-2 p-2 bg-yellow-500/10 border-l-3 border-yellow-500 rounded">
+  <div v-click="4" class="mt-2 p-2 bg-yellow-500/10 border-l-3 border-yellow-500 rounded">
     <strong>⑤ break 条件</strong>：哈希未命中（全局字典不含该哈希）或哈希碰撞但 token_ids 不匹配。<br/>
     break 之后不再检查后面的 block——因为「链断了」，后续 block 即使内容匹配也应因前缀不同而不同，不应共享。
   </div>
-  <div class="mt-2 p-2 bg-green-500/10 border-l-3 border-green-500 rounded">
+  <div v-click="5" class="mt-2 p-2 bg-green-500/10 border-l-3 border-green-500 rounded">
     <strong>⑥ 命中计数</strong>：<code>num_cached_blocks += 1</code>。哈希命中且 token_ids 全等校验通过后，该 block 可被复用。累加器同时用于 <code>allocate</code> 的两种分配路径判断。
   </div>
 </div>

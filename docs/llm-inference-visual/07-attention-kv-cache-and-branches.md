@@ -53,6 +53,18 @@ flowchart LR
     C --> O
 ```
 
+### 2.2 Prefill vs Decode：不同 API 的原因
+
+prefill 和 decode 虽然共用同一个 `Attention.forward`，但内部调用的 FlashAttention API 完全不同：
+
+| 场景                      | FlashAttention API                  | 原因                                 |
+| ------------------------- | ----------------------------------- | ------------------------------------ |
+| Prefill (无 prefix cache) | `flash_attn_varlen_func`            | 变长序列，需 cu_seqlens 标记边界     |
+| Prefill (有 prefix cache) | `flash_attn_varlen_func` with cache | K/V 来自 cache，用 block_tables 定位 |
+| Decode                    | `flash_attn_with_kvcache`           | BS 个查询，每个查不同长度的 cache    |
+
+核心差异：prefill 处理多个 token 的完整注意力（需要 cu_seqlens 分离不同 seq）；decode 处理单 token 对历史 cache 的查询（每个 seq 恰好 1 个 Q，用 context_lens + block_tables 查询 cache）。
+
 ---
 
 ## 3. Attention.forward：上下文驱动的分支

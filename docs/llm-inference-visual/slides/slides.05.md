@@ -501,7 +501,7 @@ layout: default
 
 <SourceCode file="nanovllm/engine/model_runner.py" lines="129-170" />
 
-<div class="text-xs">
+<div class="text-xs" style="font-size:0.7rem;line-height:1.2rem;">
 
 ```python
 def prepare_prefill(self, seqs: list[Sequence]):

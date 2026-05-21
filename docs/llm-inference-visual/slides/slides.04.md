@@ -65,8 +65,7 @@ BlockManager 就像操作系统课里的内存分页管理器，把显存切成�
 |------|------|----------|
 | 概念回顾 | 10 min | "注意力需要所有历史 KV"→ 显存占用大 → 需要精细管理 |
 | 代码走读 | 40 min | free/used 池、ref_count、can_allocate、哈希链、prefix cache 闭环 |
-| 脚本演示 | 10 min | L04_block_manager.py 的 4 个 section |
-| 动手练习 | 15 min | 构造哈希链 + 手算 prefix cache 命中 |
+| 动手练习 | 25 min | 构造哈希链 + 手算 prefix cache 命中 |
 | 答疑讨论 | 15 min | 为什么哈希链而不是直接比较 token_ids、碰撞处理 |
 
 <!-- 课程时间安排，参考 block_manager.py 整体结构 -->
@@ -190,7 +189,7 @@ class BlockManager:
     def __init__(self, num_blocks: int, block_size: int):
         self.block_size = block_size
         self.blocks = [Block(i) for i in range(num_blocks)]
-        self.hash_to_block_id: dict[int, int] = {}   # 哈希 → block_id
+        self.hash_to_block_id: dict[int, int] = dict()   # 哈希 → block_id
         self.free_block_ids: deque[int] = deque(range(num_blocks))
         self.used_block_ids: set[int] = set()
 ```
@@ -205,6 +204,10 @@ class BlockManager:
 <div class="bg-purple-500/10 p-3 rounded text-center">
   <strong>hash_to_block_id</strong><br/>内容寻址字典<br/>prefix cache 的索引
 </div>
+</div>
+
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>三个全局数据结构</strong>：<code>blocks</code> 列表按 block_id 索引元数据；<code>free_block_ids</code>（deque）管理空闲块；<code>hash_to_block_id</code>（dict）支撑 prefix cache 的内容寻址。
 </div>
 
 <!-- 对应 block_manager.py L26-34，三个全局数据结构：blocks、free/used 集合、hash_to_block_id -->
@@ -233,6 +236,10 @@ class Block:
     <li><code>hash</code>：链式哈希值，用于 <code>hash_to_block_id</code> 快速查找</li>
     <li><code>token_ids</code>：完整 token 序列——哈希碰撞时做全等校验</li>
   </ul>
+</div>
+
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>Block 三要素</strong>：<code>ref_count</code> 追踪引用者数量（0 可回收）；<code>hash</code> 存储链式哈希值；<code>token_ids</code> 保存完整 token 序列用于防碰撞校验。三者共同支撑 prefix cache 的命中判断与安全复用。
 </div>
 
 <!-- 对应 block_manager.py L8-23，Block 类的三个核心字段：ref_count、hash、token_ids -->
@@ -275,6 +282,8 @@ stateDiagram-v2
 <!-- Block 状态转移图：Free → Allocated → Shared → Deallocating → Free -->
 
 ---
+layout: default
+---
 
 # 链式哈希的计算
 
@@ -290,8 +299,12 @@ def compute_hash(cls, token_ids: list[int], prefix: int = -1):
     return h.intdigest()
 ```
 
-<div v-click class="mt-3 text-sm">
-  <strong>举例</strong>：block_size=4，token_ids=[1,2,3,4]，prefix=-1 → <code>h1 = hash([1,2,3,4])</code>；下一块 token_ids=[5,6,7,8]，prefix=h1 → <code>h2 = hash(prefix=h1, [5,6,7,8])</code>。h2 ≠ hash([5,6,7,8]) 直接算的结果——因为前缀参与计算。
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
+  <strong>链式机制</strong>：<code>prefix</code> 被转为 8 字节写入 xxhash，再写入当前 block 的 token 字节序列 → 最终哈希同时编码了「前缀身份」和「当前内容」。下一块以当前哈希为 prefix，形成链式依赖。具体示例见下一页。
+</div>
+
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>三步计算</strong>：① 创建 xxhash 实例 → ② 若有 prefix，将其 8 字节写入 → ③ 写入 token_ids 的字节序列返回 intdigest。链式哈希保证「相同前缀 + 相同内容」→ 相同哈希值。
 </div>
 
 <!-- 对应 block_manager.py L35-41，compute_hash 的链式哈希实现，使用 xxhash -->
@@ -303,35 +316,35 @@ layout: default
 
 # 链式哈希的具体示例
 
-<div class="text-sm">
+<div class="text-sm mt-4">
 
-假设 `block_size = 4`，一条请求的 token 序列为 [1,2,3,4, 5,6,7,8, 9,10,11,12]：
+假设 `block_size = 4`，token 序列 [1,2,3,4, 5,6,7,8, 9,10,11,12]，3 个完整 block：
 
-| Block | token_ids | prefix | 计算过程 | 结果哈希 |
-|-------|-----------|--------|----------|----------|
-| block0 | [1,2,3,4] | -1 | `xxhash([1,2,3,4])` | `h0 = 0xA3F1...` |
-| block1 | [5,6,7,8] | h0 | `xxhash(seed=h0, [5,6,7,8])` | `h1 = 0x7B2E...` |
-| block2 | [9,10,11,12] | h1 | `xxhash(seed=h1, [9,10,11,12])` | `h2 = 0xC4D9...` |
+```python
+h0 = BlockManager.compute_hash([1,2,3,4], prefix=-1)   # block0: 无前缀
+h1 = BlockManager.compute_hash([5,6,7,8], prefix=h0)   # block1: 链入 h0
+h2 = BlockManager.compute_hash([9,10,11,12], prefix=h1) # block2: 链入 h1
+
+# seq_b 的 block0 相同 → h0 相同 → 命中
+# seq_b 的 block1 也相同 → h1 相同（前缀 h0 一致）→ 继续命中
+# seq_b 的 block2 不同 → h2 必然不同 → 链中断，后续不再检查
+```
 
 </div>
 
-```python
-h0 = BlockManager.compute_hash([1,2,3,4], prefix=-1)
-h1 = BlockManager.compute_hash([5,6,7,8], prefix=h0)
-h2 = BlockManager.compute_hash([9,10,11,12], prefix=h1)
-
-# 如果另一条 seq 的 block0 内容相同 → h0 相同 → 可命中
-# 如果 block1 内容也相同，且前缀 h0 相同 → h1 相同 → 继续命中
-# 如果 block2 内容不同 → h2 必然不同 → 不命中，链中断
-```
-
-<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-xs">
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
   <strong>链式 vs 独立哈希</strong>：如果每个 block 独立哈希（不考虑前缀），那么内容为 [9,10,11,12] 的 block 无论在位置 0 还是位置 2 哈希值都一样。<br/>
   链式保证 <strong>位置语义</strong>：同一个内容出现在不同位置 → 前缀不同 → 哈希值不同。这是 prefix cache 正确性的关键——只有「从头开始的连续前缀」才能命中。
 </div>
 
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>三步验证</strong>：① 构造哈希链 h0→h1→h2，每个链接入前缀；② 相同的 token_ids + 相同前缀 → 相同哈希（确定性）；③ 不同的前缀 → 不同哈希（位置语义）。链式中断处 prefix cache 自动失效。
+</div>
+
 <!-- 链式哈希的具体数值示例，展示链式与独立哈希的区别 -->
 
+---
+layout: default
 ---
 
 # 3.3 can_allocate：逐块检查前缀命中
@@ -389,8 +402,8 @@ def can_allocate(self, seq: Sequence) -> int:
 
   <div class="grid grid-cols-2 gap-2">
   <div v-click="1" class="bg-blue-500/10 p-2 rounded">
-    <strong>① h = -1</strong> 首块无前缀<br/>
-    <strong>② seq.block(i)</strong> 从 token_ids 中切片取第 i 个 block 的 token
+    <strong>① 跳过最后不完整 block</strong>：range(num_blocks - 1) 排除最后一块<br/>
+    <strong>② seq.block(i)</strong>：从 token_ids 中切片取第 i 个 block 的 token
   </div>
   <div v-click="2" class="bg-blue-500/10 p-2 rounded">
     <strong>③ 链式计算</strong> 前一块的哈希作为 seed 参与当前块的哈希计算<br/>
@@ -409,10 +422,12 @@ def can_allocate(self, seq: Sequence) -> int:
 <!-- 对应 block_manager.py L58-67，链式遍历逻辑：计算哈希 → 查表 → 碰撞校验 → break -->
 
 ---
+layout: default
+---
 
 # can_allocate 逐行走读（下）：空闲检查与返回值
 
-```python {all|2|3|5-6|7}
+```python {all|2-3|5-6|7}
         ...
         if block_id in self.used_block_ids:        # ① 命中的 block 是否在用？
             num_new_blocks -= 1                    # ② 是 → 不需新分配
@@ -422,28 +437,31 @@ def can_allocate(self, seq: Sequence) -> int:
     return num_cached_blocks                       # ④ 返回命中数
 ```
 
-<div class="mt-3 grid grid-cols-2 gap-3 text-sm">
-<div v-click="1" class="bg-green-500/10 border-l-3 border-green-500 p-3 rounded">
-  <strong>① 检查 used_block_ids</strong><br/>
-  命中后先判断 block 是否仍在 <code>used_block_ids</code> 中——在则共享，不在则需重新取出。
+<div class="mt-3 text-sm">
+<div v-click="1" class="p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r mb-2">
+  <strong>① 命中后：共享 vs 重新取出</strong><br/>
+  命中后判断 block 是否仍在 <code>used_block_ids</code> 中——在则共享（原地 ref_count+1），<code>num_new_blocks -= 1</code>；不在则需从 free 池重新取出（哈希映射还在，KV 数据不必重算）。
 </div>
-<div v-click="2" class="bg-green-500/10 border-l-3 border-green-500 p-3 rounded">
-  <strong>② num_new_blocks 减 1</strong><br/>
-  block 仍在 used 中：原地共享，<code>num_new_blocks -= 1</code>。<br/>
-  若已被释放（哈希映射还在但不在 used）：需从 free 池重新取出，KV 数据不必重算。
-</div>
-<div v-click="3" class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded">
+<div class="grid grid-cols-2 gap-3">
+<div v-click="2" class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded">
   <strong>③ 空闲不够 → return -1</strong><br/>
   <code>len(free_block_ids) &lt; num_new_blocks</code> 时返回 -1，调度器触发 preempt 腾空间后重试。
 </div>
-<div v-click="4" class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded">
+<div v-click="3" class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded">
   <strong>④ 空闲够 → return num_cached_blocks</strong><br/>
   返回命中数，<code>allocate</code> 据此决定复用多少 block、新分配多少 block。
 </div>
 </div>
+</div>
+
+<div v-click="4" class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>下部分总览</strong>：① 命中后检查 used_block_ids → 在则 num_new_blocks--（共享），不在则从 free 重新取出（不重算 KV）→ ③ 空闲不够返回 -1 触发 preempt → ④ 空闲够返回命中数。①② 共同完成「命中后资源决策」，③④ 共同完成「可行性与返回值」。
+</div>
 
 <!-- 对应 block_manager.py L68-73，空闲检查与返回值，-1 触发 preempt -->
 
+---
+layout: default
 ---
 
 # can_allocate 命中场景示例
@@ -493,6 +511,8 @@ seq_b: [A,B,C,D, E,F,G,H, K,L,M,N]             (14 tokens → 4 blocks)
 
 <!-- can_allocate 的完整命中场景示例，展示 num_cached_blocks 和 num_new_blocks 的计算 -->
 
+---
+layout: default
 ---
 
 # 3.4 allocate：复用命中的 block + 分配新的
@@ -555,6 +575,8 @@ layout: default
 <!-- allocate 两种路径的详细对比表，包括 ref_count 和 KV 计算的区别 -->
 
 ---
+layout: default
+---
 
 # 3.5 hash_blocks：将完成的 block 登记到哈希表
 
@@ -613,6 +635,8 @@ seq_b = [1,2,3,4, 5,6,7,8]     → 前 7 个相同，第 8 个不同
 
 <!-- 不完整 block 不登记的安全性原因：防止读到垃圾 KV 数据 -->
 
+---
+layout: default
 ---
 
 # 完整闭环：从分配到回写
@@ -678,8 +702,14 @@ def deallocate(self, seq: Sequence):
   </div>
 </div>
 
+<div v-click="5" class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>deallocate 总览</strong>：逆序遍历 block_table → 递减 ref_count → 归零时回收 block 回 free 池（保留哈希索引）→ 清空 seq 的 block_table 和 num_cached_tokens。核心设计：哈希索引不删除，prefix cache 可跨请求持久复用。
+</div>
+
 <!-- 对应 block_manager.py L94-101，deallocate 逆序遍历 + ref_count 递减回收 -->
 
+---
+layout: default
 ---
 
 # 方法调用关系：Scheduler → BlockManager
@@ -700,12 +730,13 @@ flowchart LR
         BM2["allocate"]
         BM3["hash_blocks"]
         BM4["deallocate"]
+        BM5["_allocate_block"]
     end
     S_ca --> BM1
     S_al --> BM2
     S_da --> BM4
     S_hb --> BM3
-    S_ma --> BM5["_allocate_block"]
+    S_ma --> BM5
 ```
 
 </div>
@@ -864,7 +895,7 @@ assert bm.blocks[seq_b.block_table[0]].ref_count == 2  # 两个引用
 ```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>§1</strong> 验证链式哈希 ≠ 直接哈希（前缀参与计算）；<strong>§2</strong> 验证 can_allocate 命中 2 blocks → block_table 前两项共享 → ref_count=2。与 <a href="#">3.3 can_allocate</a> 中的命中场景示例一致。
+  <strong>§1</strong> 验证链式哈希 ≠ 直接哈希（前缀参与计算）；<strong>§2</strong> 验证 can_allocate 命中 2 blocks → block_table 前两项共享 → ref_count=2。与 3.3 can_allocate 中的命中场景示例一致。
 </div>
 
 <!-- §1 哈希链构造 + §2 can_allocate 命中的代码示例和断言 -->
@@ -913,11 +944,11 @@ layout: default
 <SelfTest
   id="l04-q2"
   type="text"
-  question="2. hash_blocks 只写回完整 block。如果一条请求只有 3 个 token（不满一个 block），其 KV cache 就永远不会被 prefix cache 复用。这在什么场景下影响最大？"
-  answer="<strong>影响最大的场景</strong>：系统级别的 prompt 前缀复用。例如所有请求共享一个 100-token 的 system prompt，只有最后几个 token 落在不完整 block 中。前几个完整 block 可以被复用，但最后一个不完整 block 每次都要重新计算。<br><strong>系统 prompt 场景</strong>：如果 system prompt 长度恰好多出几个 token 不满一个 block，这些 token 的 KV cache 浪费了——每次新请求都要重算最后几个 token。一个缓解方式是把 system prompt 截断/补齐到 block 边界。"
+  question="2. can_allocate 中，对于已命中但不在 used_block_ids 中的 block 不扣减 num_new_blocks。这个 block 处于什么状态？何时会出现这种状态？"
+  answer="<strong>状态</strong>：block 在 <code>hash_to_block_id</code> 中有记录（曾经被填写过），但不在 <code>used_block_ids</code> 中——说明它已经被 <code>deallocate</code> 释放了。<br><strong>何时出现</strong>：一个 seq 完成了前缀写回（hash_blocks），然后被 preempt（deallocate）。block 回到 free 池，但哈希映射还在。后续 seq 的 <code>can_allocate</code> 可以在 <code>hash_to_block_id</code> 中找到它。如果这个 block 仍在 free 池中，可以重新分配给新 seq 使用（不必重新计算 KV）。这是 prefix cache 的威力——即使原 seq 已经结束，已计算的 KV block 仍可被后续请求复用。"
 />
 
-<!-- 课后自测题 Q1-Q2：链式哈希的意义和完整 block 登记的边界情况 -->
+<!-- 课后自测题 Q1-Q2：链式哈希的意义和 can_allocate 中 used_block_ids 的状态分析 -->
 
 ---
 layout: default
@@ -928,11 +959,11 @@ layout: default
 <SelfTest
   id="l04-q3"
   type="text"
-  question="3. can_allocate 中，对于已命中但不在 used_block_ids 中的 block 不扣减 num_new_blocks。这个 block 处于什么状态？何时会出现这种状态？"
-  answer="<strong>状态</strong>：block 在 <code>hash_to_block_id</code> 中有记录（曾经被填写过），但不在 <code>used_block_ids</code> 中——说明它已经被 <code>deallocate</code> 释放了。<br><strong>何时出现</strong>：一个 seq 完成了前缀写回（hash_blocks），然后被 preempt（deallocate）。block 回到 free 池，但哈希映射还在。后续 seq 的 <code>can_allocate</code> 可以在 <code>hash_to_block_id</code> 中找到它。如果这个 block 仍在 free 池中，可以重新分配给新 seq 使用（不必重新计算 KV）。这是 prefix cache 的威力——即使原 seq 已经结束，已计算的 KV block 仍可被后续请求复用。"
+  question="3. hash_blocks 只写回完整 block。如果一条请求只有 3 个 token（不满一个 block），其 KV cache 就永远不会被 prefix cache 复用。这在什么场景下影响最大？"
+  answer="<strong>影响最大的场景</strong>：系统级别的 prompt 前缀复用。例如所有请求共享一个 100-token 的 system prompt，只有最后几个 token 落在不完整 block 中。前几个完整 block 可以被复用，但最后一个不完整 block 每次都要重新计算。<br><strong>系统 prompt 场景</strong>：如果 system prompt 长度恰好多出几个 token 不满一个 block，这些 token 的 KV cache 浪费了——每次新请求都要重算最后几个 token。一个缓解方式是把 system prompt 截断/补齐到 block 边界。"
 />
 
-<!-- 课后自测题 Q3：已命中但不在 used_block_ids 中的 block 状态分析 -->
+<!-- 课后自测题 Q3：hash_blocks 只登记完整 block 的边界情况 -->
 
 ---
 layout: center

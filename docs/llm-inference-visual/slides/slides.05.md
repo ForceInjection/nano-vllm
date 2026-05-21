@@ -47,7 +47,7 @@ layout: default
 
 </div>
 
-<div v-click class="mt-4 text-sm opacity-80">
+<div v-click class="mt-4 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
   L01-L04 覆盖了引擎调度层。L05 进入<strong>模型执行层</strong>：prefill 阶段模型实际"吃进去"的张量长什么样——多个请求被展平拼接成一个大批次。
 </div>
 

@@ -404,7 +404,7 @@ for seq in seqs:
     seqlen_k = seq.num_cached_tokens + seq.num_scheduled_tokens
     cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
 
-need_block_tables = cu_seqlens_k[-1] > cu_seqlens_q[-1]
+if cu_seqlens_k[-1] > cu_seqlens_q[-1]:    # prefix cache 触发
 ```
 
 <div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
@@ -512,10 +512,16 @@ def prepare_prefill(self, seqs: list[Sequence]):
         cu_seqlens_q.append(cu_seqlens_q[-1] + end - start)  # ④ Q 侧前缀和
         cu_seqlens_k.append(cu_seqlens_k[-1] + end)          # ⑤ K 侧前缀和
         if not seq.block_table: continue                     # warmup 跳过
-        for i in range(start // bs, (end + bs - 1) // bs):   # ⑥ 逐 block 算 slot
-            slot_start = seq.block_table[i] * bs
-            if i == start // bs: slot_start += start % bs
-            slot_end = ...                                    # 首/末 block 特殊处理
+        start_block = start // self.block_size               # ⑥ 逐 block 算 slot
+        end_block = (end + self.block_size - 1) // self.block_size
+        for i in range(start_block, end_block):
+            slot_start = seq.block_table[i] * self.block_size
+            if i == start_block:
+                slot_start += start % self.block_size
+            if i != end_block - 1:
+                slot_end = seq.block_table[i] * self.block_size + self.block_size
+            else:
+                slot_end = seq.block_table[i] * self.block_size + end - i * self.block_size
             slot_mapping.extend(range(slot_start, slot_end))
     if cu_seqlens_k[-1] > cu_seqlens_q[-1]:                  # ⑦ prefix cache?
         block_tables = self.prepare_block_tables(seqs)
@@ -595,15 +601,9 @@ layout: default
 # Context 的生命周期
 
 ```python
-# ModelRunner.run() 中的使用
-set_context(
-    is_prefill=True,
-    slot_mapping=slot_mapping,
-    cu_seqlens_q=cu_seqlens_q,
-    cu_seqlens_k=cu_seqlens_k,
-    block_tables=block_tables if need_block_tables else None,
-    ...
-)
+# prepare_prefill 末尾的调用 (model_runner.py L169)
+set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k,
+            slot_mapping, None, block_tables)
 output = self.model(input_ids, positions)  # Attention 内部 get_context()
 reset_context()                              # 清空，防止泄漏到下一步
 ```
@@ -622,7 +622,7 @@ layout: default
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.6}
+```mermaid {scale: 0.45}
 sequenceDiagram
     participant Runner as ModelRunner.run()
     participant CTX as Context模块全局变量
@@ -731,7 +731,6 @@ layout: default
 # 模拟两个请求
 seqs = [([0,1,2], 0, 3),          # (token_ids, cached, scheduled)
         ([10,11,12,13], 0, 2)]
-
 input_ids = []
 positions = []
 cu_seqlens_q = [0]
@@ -739,7 +738,7 @@ cu_seqlens_q = [0]
 for tokens, cached, scheduled in seqs:
     start, end = cached, cached + scheduled
     input_ids.extend(tokens[start:end])
-    positions.extend(list(range(start, end)))
+    positions.extend(range(start, end))
     cu_seqlens_q.append(cu_seqlens_q[-1] + scheduled)
 
 print(f"input_ids:      {input_ids}")      # [0, 1, 2, 10, 11]
@@ -781,9 +780,8 @@ print(f"cu_seqlens_k: {cu_seqlens_k}")   # [0, 3, 9]  ← K: 含缓存
 need_bt = cu_seqlens_k[-1] > cu_seqlens_q[-1]  # 9 > 5 → True
 ```
 
-<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
-
-**为什么 need_bt=True？**
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-xs">
+<strong>为什么 need_bt=True？</strong>
 
 - seq_b 的 Q 侧只有 2 个 new token
 - 但 K 侧有 4 个缓存的 + 2 个新的 = 6 个
@@ -791,7 +789,7 @@ need_bt = cu_seqlens_k[-1] > cu_seqlens_q[-1]  # 9 > 5 → True
 
 </div>
 
-<div v-click class="mt-2 text-sm bg-green-500/10 p-3 rounded">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-xs">
   <strong>关键洞察</strong>：need_block_tables 是 per-batch 的标志位——只要 batch 中任一 seq 需要 block_tables，整个 batch 都传递。
 </div>
 

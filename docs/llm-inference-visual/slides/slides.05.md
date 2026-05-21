@@ -189,7 +189,7 @@ layout: default
 | **2D padding** | 形状规整，直接做 batch matmul | 无效 token 浪费计算、浪费显存 |
 | **1D 展平 + cu_seqlens** | 零浪费、计算量精确 | 需要变长注意力算子支持 |
 
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>举例</strong>：A 有 1024 token，B 有 8 token。2D padding 需要 (2, 1024) 矩阵，其中 1016 个位置是无效的 padding token。1D 展平只需要 1032 个有效位置。FlashAttention 的 <code>varlen</code> API 原生支持这种变长格式。
 </div>
 
@@ -283,7 +283,6 @@ for seq in seqs:
     start = seq.num_cached_tokens
     end = start + seq.num_scheduled_tokens
     input_ids.extend(seq[start:end])
-
 input_ids = torch.tensor(input_ids, dtype=torch.int64)  # 展平 → 1D
 ```
 
@@ -336,7 +335,7 @@ positions = torch.tensor(positions, dtype=torch.int64)
 
 </div>
 
-<div v-click class="mt-2 text-sm">
+<div v-click class="mt-2 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
   <strong>为什么 prefix cache 下 positions 不从 0 开始？</strong>因为 RoPE 编码需要每个 token 知道自己在原始序列中的真实位置——即使前半段已经缓存。如果从 0 开始，RoPE 的旋转角会错位，导致注意力分数异常。
 </div>
 
@@ -365,7 +364,7 @@ need_block_tables = cu_seqlens_k[-1] > cu_seqlens_q[-1]
   <strong>要点总览</strong>：KV 侧长度 = cached + scheduled。当任一 seq 有缓存历史 token 时，cu_seqlens_k > cu_seqlens_q，触发 block_tables 传递。
 </div>
 
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
   <strong>当 prefix cache 命中时</strong>：<code>seqlen_k > seqlen_q</code>——因为 K/V cache 中已存在历史 token 的 KV，但 Query 侧只有本轮新增的 token。此时需要 <code>block_tables</code> 来访问已缓存的 KV。
 </div>
 
@@ -499,7 +498,7 @@ for seq in seqs:
 
 </div>
 
-<div v-click class="mt-2 text-sm text-yellow-400">
+<div v-click class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   ⚠️ <code>bt[i // block_size]</code> 不是简单的 <code>i</code>——block_table 存储的是物理 block_id（由 BlockManager 分配），不是连续的逻辑编号。
 </div>
 
@@ -746,7 +745,7 @@ sequenceDiagram
 ```
 
 </div>
-<div v-click class="mt-2 text-sm text-yellow-400">
+<div v-click class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
   ⚠️ 如果忘记 <code>reset_context()</code>，下一步可能读到上一步的过时数据——这是隐式状态传递最大的坑。
 </div>
 
@@ -849,7 +848,7 @@ seqs2 = [([0,1,2], 0, 3), ([10,11,12,13], 2, 2)]
 # positions: [0,1,2, 2,3]  ← seq_b 从 2 开始
 ```
 
-<div v-click class="mt-2 text-sm">
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   <strong>验证要点</strong>：cu_seqlens_q 是前缀和——<code>cu[1]=3</code> 表示 seq_a 有 3 个 token，<code>cu[2]=5</code> 表示前两个 seq 共 5 个 token。positions 在无 cache 时从 0 开始；有 cache 时从 <code>cached</code> 开始。
 </div>
 
@@ -879,7 +878,7 @@ print(f"cu_seqlens_k: {cu_seqlens_k}")   # [0, 3, 9]  ← K: 含缓存
 need_bt = cu_seqlens_k[-1] > cu_seqlens_q[-1]  # 9 > 5 → True
 ```
 
-<div v-click class="mt-3 text-sm">
+<div v-click class="mt-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
 
 **为什么 need_bt=True？**
 

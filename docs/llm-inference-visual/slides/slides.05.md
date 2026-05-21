@@ -497,77 +497,36 @@ layout: default
 layout: default
 ---
 
-# prepare_prefill 完整代码走读（上）
+# prepare_prefill 完整代码走读
 
-<SourceCode file="nanovllm/engine/model_runner.py" lines="129-148" />
+<SourceCode file="nanovllm/engine/model_runner.py" lines="129-170" />
 
 ```python
 def prepare_prefill(self, seqs: list[Sequence]):
-    input_ids = []
-    positions = []
-    cu_seqlens_q = [0]
-    cu_seqlens_k = [0]
-    max_seqlen_q = 0
-    max_seqlen_k = 0
-    slot_mapping = []
-    block_tables = None
+    input_ids, positions, cu_seqlens_q, cu_seqlens_k = [], [], [0], [0]  # ① 初始化
+    slot_mapping, block_tables = [], None
     for seq in seqs:
-        start = seq.num_cached_tokens
-        seqlen_q = seq.num_scheduled_tokens
-        end = start + seqlen_q
-        seqlen_k = end
-        input_ids.extend(seq[start:end])
-        positions.extend(range(start, end))
-        cu_seqlens_q.append(cu_seqlens_q[-1] + seqlen_q)
-        cu_seqlens_k.append(cu_seqlens_k[-1] + seqlen_k)
-        max_seqlen_q = max(seqlen_q, max_seqlen_q)
-        max_seqlen_k = max(seqlen_k, max_seqlen_k)
-```
-
-<div class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>上半部分</strong>：变量初始化 + 主循环收集 input_ids/positions/cu_seqlens/max_seqlen。下半部分看 slot_mapping + 张量创建 + set_context。
-</div>
-
-<!-- prepare_prefill 上半部分：初始化变量 + 主循环中收集各 seq 的 input_ids、positions、cu_seqlens、max_seqlen。 -->
-
----
-layout: default
----
-
-# prepare_prefill 完整代码走读（下）
-
-<SourceCode file="nanovllm/engine/model_runner.py" lines="149-170" />
-
-```python
-        if not seq.block_table:    # warmup
-            continue
-        start_block = start // self.block_size
-        end_block = (end + self.block_size - 1) // self.block_size
-        for i in range(start_block, end_block):
-            slot_start = seq.block_table[i] * self.block_size
-            if i == start_block:
-                slot_start += start % self.block_size
-            if i != end_block - 1:
-                slot_end = seq.block_table[i] * self.block_size + self.block_size
-            else:
-                slot_end = seq.block_table[i] * self.block_size + end - i * self.block_size
+        start, end = seq.num_cached_tokens, seq.num_cached_tokens + seq.num_scheduled_tokens
+        input_ids.extend(seq[start:end])                     # ② 展平 token
+        positions.extend(range(start, end))                  # ③ 绝对位置
+        cu_seqlens_q.append(cu_seqlens_q[-1] + end - start)  # ④ Q 侧前缀和
+        cu_seqlens_k.append(cu_seqlens_k[-1] + end)          # ⑤ K 侧前缀和
+        if not seq.block_table: continue                     # warmup 跳过
+        for i in range(start // bs, (end + bs - 1) // bs):   # ⑥ 逐 block 算 slot
+            slot_start = seq.block_table[i] * bs
+            if i == start // bs: slot_start += start % bs
+            slot_end = ...                                    # 首/末 block 特殊处理
             slot_mapping.extend(range(slot_start, slot_end))
-    if cu_seqlens_k[-1] > cu_seqlens_q[-1]:    # prefix cache
+    if cu_seqlens_k[-1] > cu_seqlens_q[-1]:                  # ⑦ prefix cache?
         block_tables = self.prepare_block_tables(seqs)
-    input_ids = torch.tensor(input_ids, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-    positions = torch.tensor(positions, dtype=torch.int64, pin_memory=True).cuda(non_blocking=True)
-    cu_seqlens_q = torch.tensor(cu_seqlens_q, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-    cu_seqlens_k = torch.tensor(cu_seqlens_k, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-    slot_mapping = torch.tensor(slot_mapping, dtype=torch.int32, pin_memory=True).cuda(non_blocking=True)
-    set_context(True, cu_seqlens_q, cu_seqlens_k, max_seqlen_q, max_seqlen_k, slot_mapping, None, block_tables)
-    return input_ids, positions
+    # ⑧ 创建张量 (int64 for ids/pos, int32 for others) + set_context → return
 ```
 
-<div class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>下半部分</strong>：slot_mapping 按 block 批量计算 → prefix cache 判断 → block_tables → int64/int32 张量创建 → set_context 注入 → 返回 input_ids/positions。
+<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>八步总览</strong>：① 初始化七变量 → ②③④⑤ 主循环展平拼接 → ⑥ slot_mapping 按 block 计算 → ⑦ prefix cache 判断 → ⑧ 张量创建 + set_context 注入。完整源码见 model_runner.py L129-L170。
 </div>
 
-<!-- prepare_prefill 下半部分：slot_mapping 按 block 批量计算 + prefix cache 判断 + 张量创建 + set_context 注入。 -->
+<!-- prepare_prefill 完整流程八步总览：初始化→主循环→slot_mapping→prefix cache→张量→Context→返回。 -->
 
 ---
 layout: default

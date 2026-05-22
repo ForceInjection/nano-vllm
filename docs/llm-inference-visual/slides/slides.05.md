@@ -130,7 +130,7 @@ flowchart LR
 ```
 
 </div>
-<div v-click class="mt-3 text-xs">
+<div class="flex items-start gap-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-xs">
 
 - **Q（Query）**：每个 token 问"谁和我相关？"
 - **K（Key）**：每个 token 回答"我能提供这些信息"

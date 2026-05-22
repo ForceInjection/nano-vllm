@@ -729,33 +729,51 @@ flowchart LR
 layout: default
 ---
 
-# prefix cache 命中时的完整执行路径
+# prefix cache 命中时的完整执行路径（上）：调度侧
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.4}
+```mermaid {scale: 0.65}
 flowchart LR
-    A["prepare_prefill"] --> B["slot_mapping<br/>(仅新增 token)"]
+    A["prepare_prefill"] --> B["slot_mapping<br/>(仅新增 token 的 slot)"]
     B --> C{"cu_seqlens_k[-1] ><br/>cu_seqlens_q[-1]?"}
     C -- Yes --> D["prepare_block_tables<br/>prefix cache 触发"]
-    C -- No --> E["block_tables=None<br/>普通 prefill"]
-    D --> F["set_context"]
+    C -- No --> E["block_tables = None<br/>普通 prefill"]
+    D --> F["set_context 注入<br/>(含 block_tables)"]
     E --> F
-    F --> G["Attention.forward"]
-    G --> H["store_kvcache<br/>(仅新增)"]
-    H --> I{"block_tables ≠ None?"}
-    I -- Yes --> J["k,v=k_cache,v_cache<br/>varlen_func(q,cache,bt)"]
-    I -- No --> K["varlen_func<br/>(q,k,v)"]
-    J & K --> L["return"]
 ```
 
 </div>
 
-<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>验证点</strong>：slot_mapping 的 range 是 <code>[num_cached_tokens, num_cached_tokens + num_scheduled_tokens)</code>——已跳过历史 token。store_kvcache 不会对已缓存 token 重复写入。k,v=k_cache,v_cache 替换的只是<strong>注意力计算的输入</strong>，不是 KV 写入逻辑。
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>调度侧</strong>：slot_mapping 的 range 是 <code>[num_cached_tokens, num_cached_tokens+num_scheduled_tokens)</code>——已跳过历史 token。cu_seqlens_k > cu_seqlens_q 时触发 prefix cache，prepare_block_tables 后通过 set_context 注入 block_tables。
 </div>
 
-<!-- prefix cache 完整执行路径：prepare_prefill → slot_mapping 过滤历史 → cu_seqlens 触发 prefix cache → set_context → store_kvcache 仅写新增 → block_tables 触发 k,v 替换 → varlen_func 读 cache。两个决策点串联。-->
+<!-- prefix cache 执行路径（上）：prepare_prefill → slot_mapping 过滤历史 → cu_seqlens 判断 → prepare_block_tables → set_context。-->
+
+---
+
+# prefix cache 命中时的完整执行路径（下）：Attention 侧
+
+<div class="flex justify-center">
+
+```mermaid {scale: 0.6}
+flowchart LR
+    A["Attention.forward"] --> B["store_kvcache<br/>(仅新增 token)"]
+    B --> C{"block_tables ≠ None?"}
+    C -- Yes --> D["k, v = k_cache, v_cache<br/>历史 K/V 从 cache 复用"]
+    D --> E["varlen_func(q,k_cache,v_cache,bt)"]
+    C -- No --> F["varlen_func(q,k,v)"]
+    E & F --> G["return 注意力输出"]
+```
+
+</div>
+
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>Attention 侧</strong>：store_kvcache 只写新增 token（slot_mapping 已过滤历史）。block_tables ≠ None 时 k,v 替换为 k_cache,v_cache——替换的是<strong>注意力计算的输入</strong>，不是 KV 写入逻辑。两者通过不同上下文字段解耦。
+</div>
+
+<!-- prefix cache 执行路径（下）：Attention.forward → store_kvcache 仅写新增 → block_tables 判断 → k,v 替换 → varlen_func → return。-->
 
 ---
 layout: section
@@ -830,20 +848,55 @@ layout: default
 
 # §3-4：prefix cache 触发条件 + 真实 Context 类
 
-<div class="grid grid-cols-2 gap-3 mt-3 text-sm">
-<div class="bg-purple-500/10 p-3 rounded">
-  <strong>§3: prefix cache 触发条件</strong><br/>
-  cu_k[-1] > cu_q[-1] → need_bt<br/>
-  验证两个元组的预期布尔值
+<div class="grid grid-cols-2 gap-4 mt-3 text-sm">
+<div>
+
+**§3: prefix cache 触发条件**
+
+```python
+cases = [
+    ([0, 3, 8], [0, 8, 13], True),   # K 侧更长 → 触发
+    ([0, 3, 8], [0, 3, 8],  False),  # 相等 → 不触发
+]
+for cu_q, cu_k, expected in cases:
+    needs_bt = cu_k[-1] > cu_q[-1]
+    assert needs_bt == expected
+```
+
+<div class="mt-2 p-2 bg-purple-500/10 border-l-3 border-purple-500 rounded-r text-xs">
+  cu_seqlens_k[-1] > cu_seqlens_q[-1] 时触发 prefix cache——意味着 K 侧包含已缓存的 token，需要 block_tables 定位。
 </div>
-<div class="bg-yellow-500/10 p-3 rounded">
-  <strong>§4: 真实 Context 类 + store_kvcache</strong><br/>
-  分配 (4,256,8,128) K/V cache tensor<br/>
-  用 3 个模拟 token 写入并验证
+
+</div>
+<div>
+
+**§4: 真实 Context 类 + store_kvcache**
+
+```python
+# KV cache 分配（对齐 model_runner.py:L115）
+k_cache = torch.zeros(4, 256, 8, 128)
+v_cache = torch.zeros(4, 256, 8, 128)
+
+# store_kvcache 模拟：slot → block/pos → 写入
+slots = torch.tensor([10, 256, 511])
+block_ids = slots // 256    # [0, 1, 1]
+positions = slots % 256     # [10, 0, 255]
+for idx in range(3):
+    k_cache[block_ids[idx], positions[idx]] = k_new[idx]
+```
+
+<div class="mt-2 p-2 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-xs">
+  同时验证 Context 完整生命周期：<code>set_context</code>（注入 prefill/decode 字段）→ <code>get_context</code>（Attention 读取）→ <code>reset_context</code>（清空）。
+</div>
+
 </div>
 </div>
 
-<!-- §3 验证 prefix cache 触发条件：cu_k[-1] > cu_q[-1] 时 need_block_tables=True。§4 用真实的 Context 类 + 模拟的 (4,256,8,128) K/V cache tensor 做端到端写入验证——3 个模拟 token 写入后检查 cache 中的值是否正确。-->
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>验证要点</strong>：§3 确认 block_tables 是按 batch 级别的标志位（任一 seq 需要则全 batch 传递）。§4 确认 slot_mapping → block_id + offset → KV cache 写入的完整链路，以及 Context 的 set→get→reset 三步不被泄漏。
+</div>
+
+<!-- §3-4 验证：prefix cache 触发条件（cu_k[-1] > cu_q[-1]）+ Context 生命周期（set→get→reset）+ store_kvcache 张量模拟（slot→block/pos→写入）。-->
 
 ---
 layout: default

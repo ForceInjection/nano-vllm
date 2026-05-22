@@ -44,14 +44,14 @@ No test suite, linter, or type-checker is configured in this repo.
 
 ## Architecture
 
-**`LLM` (nanovllm/llm.py) is just a class alias for `LLMEngine`** — the entire public API surface is `LLM.generate(prompts, sampling_params)`, which tokenizes inputs, loops `step()` until all sequences finish, and detokenizes outputs.
+**`LLM` (nanovllm/llm.py) is just a class alias for `LLMEngine`** — the entire public API surface is `LLM.generate(prompts, sampling_params)`, which tokenizes inputs, loops `step()` until all sequences finish, and detokenizes outputs. Returns `list[dict]` where each dict has `{"text": str}`.
 
 ### Request lifecycle
 
 1. `LLMEngine.add_request()` tokenizes and wraps the prompt into a `Sequence`, enqueues it in `Scheduler.waiting`.
 2. `Scheduler.schedule()` moves sequences through two phases:
    - **Prefill**: takes sequences from `waiting`, allocates KV-cache blocks (with prefix-cache reuse), schedules as many tokens as possible within `max_num_batched_tokens`. First sequence may be chunk-prefilled.
-   - **Decode**: pops from `running` in FIFO order, allocates one new block per sequence if needed. Preempts when out of blocks (evicts a running seq back to `waiting`, deallocating its blocks).
+   - **Decode**: pops from `running` in FIFO order, allocates one new block per sequence if needed. Preempts when out of blocks (evicts a running seq back to `waiting`, deallocating its blocks). After scheduling, runs `extendsleft(reversed(scheduled_seqs))` to put them back at the left of the deque — this means decoding sequences keep priority over newly started ones, creating a simple round-robin within the decoding batch.
 3. `ModelRunner.run()` prepares input tensors differently for prefill vs decode, runs the model, and samples next tokens.
 4. `Scheduler.postprocess()` writes token outputs back to sequences, hashes completed blocks for prefix caching, and transitions finished sequences to `FINISHED`.
 
@@ -59,7 +59,8 @@ No test suite, linter, or type-checker is configured in this repo.
 
 - **Thread-local `Context`** (nanovllm/utils/context.py): Scheduling metadata (slot_mapping, block_tables, context_lens, cu_seqlens) is passed to attention layers via a module-level global rather than threading through model forward signatures. This avoids changing the standard Transformer forward interface.
 - **Tensor parallelism via multiprocessing**: TP workers are separate processes (spawn context) communicating through NCCL for tensors and `SharedMemory` + `Event` for control. Rank 0 writes method name + pickled args to shared memory; ranks > 0 poll and execute. This is why `Sequence.__getstate__`/`__setstate__` is pickling-aware (only transmits essential fields).
-- **CUDA graph** captured for decode at batch sizes [1, 2, 4, 8, 16, 32, ..., max_bs]. Only used when `enforce_eager=False` and `input_ids.size(0) <= 512`.
+- **ModelRunner.__init__ ordering matters**: warmup model (dummy prefill) → allocate KV-cache (computed from GPU memory stats: `int(total * gpu_memory_utilization - used - peak + current) // block_bytes`) → capture CUDA graph → setup TP shared-memory IPC. During init, `torch.set_default_device("cuda")` and `torch.set_default_dtype(hf_config.dtype)` are set so all tensor creation defaults to CUDA; restored to CPU/float32 afterward.
+- **CUDA graph** captured for decode at batch sizes [1, 2, 4, 8, 16, 32, ..., max_bs]. Only used when `enforce_eager=False` and `input_ids.size(0) <= 512`. The graph captures the model forward pass; logits projection (lm_head) and sampling run outside the graph so per-request temperature can be applied.
 - **Prefix caching** in `BlockManager`: each filled block is hashed (xxhash) with its prefix hash as a seed, creating a content-addressed lookup. During prefill, `can_allocate()` walks blocks checking hash matches and does reference counting for shared blocks.
 
 ### Module map

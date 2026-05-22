@@ -220,30 +220,32 @@ layout: default
 
 <SourceCode file="nanovllm/engine/model_runner.py" lines="172-188" />
 
-```python {all|2-3|4-6}
+```python {all|2-6|7-10|11-12}
 def prepare_decode(self, seqs: list[Sequence]):
     input_ids = []                                    # ① 初始化收集列表
     positions = []
     slot_mapping = []
     context_lens = []
     for seq in seqs:
-        input_ids.append(seq.last_token)              # ② 每 seq 1 个 token
+        input_ids.append(seq.last_token)              # ② 每 seq 取最后 token
         positions.append(len(seq) - 1)                # ③ 绝对位置
         context_lens.append(len(seq))
         slot_mapping.append(...)                      # 见 3.3
-    input_ids = torch.tensor(input_ids, dtype=torch.int64)   # ④ [bs]!
-    positions = torch.tensor(positions, dtype=torch.int64)   # [bs]!
+    input_ids = torch.tensor(input_ids, dtype=torch.int64)   # ④ 转为 [bs] 张量
+    positions = torch.tensor(positions, dtype=torch.int64)
 ```
 
-<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>要点总览</strong>：decode 使用 <code>append</code> 而非 <code>extend</code>——每 seq 只追加 1 个元素，结果是形状 <code>[bs]</code> 的等长张量。positions = len(seq)-1 是当前生成 token 的绝对位置（在 RoPE 编码中与历史位置连续）。
+<div v-click="1" class="mt-2 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
+  <strong>① 初始化四个收集列表</strong>：input_ids、positions、slot_mapping、context_lens。比 prefill 少了 cu_seqlens_q/k —— decode 不需要变长边界标记。
+</div>
+<div v-click="2" class="mt-2 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
+  <strong>② 循环体收集</strong>：每 seq 用 <code>append</code> 追加 1 个元素（vs prefill 的 <code>extend</code> 批量追加）。③ positions = len(seq)-1 是当前生成 token 的绝对位置，在 RoPE 编码中与历史位置连续。context_lens 传给 flash_attn_with_kvcache 的 cache_seqlens（见 3.2）。
+</div>
+<div v-click="3" class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>④ 张量转换</strong>：<code>torch.tensor(..., dtype=torch.int64)</code> 将列表转为 <code>[bs]</code> 形状。decode 每 seq 固定 1 token → 天然规整为 [bs]，无需 cu_seqlens——这是与 prefill 的 [Σscheduled] 最核心的差异。
 </div>
 
-<div v-click class="mt-2 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
-  💡 与 prefill 的 <code>extend(seq[start:end])</code> 形成鲜明对比：prefill 可能一个 seq 就拼接几十上百个 token，而 decode 每 seq 只有 1 个。这是 decode 形状规整为 [bs] 的根本原因。
-</div>
-
-<!-- 3.1 input_ids 和 positions：decode 每 seq 仅 1 token，append 得到 [bs] 形状。 -->
+<!-- 3.1 input_ids 和 positions：三步动画 —— ① 初始化四个列表 ② 循环体 append（每 seq 1 token）③ 转为 [bs] 张量。-->
 
 ---
 layout: default
@@ -268,11 +270,11 @@ context_lens.append(len(seq))          # prompt + 已生成 token 总数
 
 </div>
 
-<div v-click class="mt-4 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+<div v-click class="mt-4 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-xs">
   <strong>为什么 decode 需要 context_lens？</strong>每个 seq 的 KV cache 中实际有效长度不同（有的刚生成 10 token，有的已生成 200）。FlashAttention 需要知道"这个 seq 最多能往前看多少 token"——即 <code>cache_seqlens</code>。它和 <code>block_tables</code> 一起，完整描述了"从哪里读、读多少"。
 </div>
 
-<div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
+<div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-xs">
   ⚠️ 注意区分：<code>context_lens</code> 是 KV cache 中有效 token 的总数（等于 len(seq)），<strong>不是</strong>最后一个 block 中的 token 数（那是 <code>seq.last_block_num_tokens</code>）。
 </div>
 
@@ -322,7 +324,7 @@ layout: default
 
 # 3.3 slot_mapping：一个 token 写到哪里？
 
-<SourceCode file="nanovllm/engine/model_runner.py" lines="172-188" />
+<SourceCode file="nanovllm/engine/model_runner.py" lines="181-181" />
 
 ```python
 slot_mapping = []
@@ -335,8 +337,6 @@ for seq in seqs:
 
 <div class="mt-3 text-sm">
 
-**decode slot 公式拆解：**
-
 | 部分 | 含义 | 示例 (block_size=256) |
 |------|------|-----------------------|
 | `block_table[-1]` | 最后（最新）的物理 block_id | seq 的 block_table=[5,12] → `bt[-1]=12` |
@@ -346,7 +346,7 @@ for seq in seqs:
 
 </div>
 
-<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-xs">
   <strong>公式核心</strong>：<code>slot = block_table[-1] × block_size + (num_tokens - 1) % block_size</code>。新 token 总是写入 <strong>最后一个 block</strong> 的 <strong>末尾位置</strong>。与 prefill 的 batch slot_mapping 不同，decode 每 seq 只计算 1 个 slot。
 </div>
 
@@ -553,24 +553,20 @@ layout: default
 
 <div class="text-sm">
 
-**block_size=4 时 len(seq) 与触发条件的关系：**
+**block_size=4 时，`len(seq) % 4 == 1` 触发 may_append：**
 
-| len(seq) | len % 4 | 触发？ | 原因 |
+| len(seq) | len % 4 | 触发？ | 说明 |
 |:--------:|:-------:|:-----:|------|
-| 1 | 1 | ✅ | 第一个 token，需要初始 block |
-| 2 | 2 | ❌ | 第 2 个 token，block 还空 3 个 slot |
-| 3 | 3 | ❌ | 第 3 个 token |
-| 4 | 0 | ❌ | 刚好填满第 1 个 block（末尾 slot 已占用） |
-| 5 | 1 | ✅ | 刚刚填满 block 0 → 需要 block 1 |
-| 6 | 2 | ❌ | block 1 还有空位 |
-| 7 | 3 | ❌ | block 1 还有空位 |
-| 8 | 0 | ❌ | 刚好填满 block 1 |
-| 9 | 1 | ✅ | 刚刚填满 block 1 → 需要 block 2 |
+| 1 | 1 | ✅ | 初始分配 block 0 |
+| 4 | 0 | ❌ | 刚好填满，不触发 |
+| 5 | 1 | ✅ | 跨边界，分配 block 1 |
+| 8 | 0 | ❌ | 刚好填满，不触发 |
+| 9 | 1 | ✅ | 跨边界，分配 block 2 |
 
 </div>
 
 <div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
-  <strong>规律</strong>：每次 token 写入的"时机"是写完一个 block 的最后一个位置后（即 len % block_size == 0 时写入完毕），下一个 token (<code>len % block_size == 1</code>) 需要新 block。所以 may_append 在 len % block_size == 1 时触发。
+  <strong>规律</strong>：写完 block 最后一个位置（len % bs == 0）后，下一个 token（len % bs == 1）需要新 block → <code>may_append</code> 触发 <code>_allocate_block()</code>。
 </div>
 
 <!-- may_append 触发边界示例：block_size=4 时，len=1/5/9 触发新 block 分配。 -->
@@ -579,38 +575,51 @@ layout: default
 layout: default
 ---
 
-# 完整 decode 流程
+# 完整 decode 流程（上）：调度
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.45}
+```mermaid {scale: 0.6}
 flowchart TD
-    A["schedule() decode 分支"] --> B{"can_append(seq)?"}
-    B -->|"False: 无空闲 block"| C{"有其他 seq<br/>可 preempt?"}
-    C -->|"是"| D["preempt 其他 seq<br/>(evict→waiting)"]
-    C -->|"否"| E["preempt 自身<br/>(evict→waiting)"]
-    D --> B
-    E --> F["跳过此 seq"]
-    B -->|"True: free 够"| G["may_append(seq)<br/>分配新 block"]
-    G --> H["prepare_decode(seqs)"]
-    H --> I["input_ids [bs]<br/>positions [bs]<br/>slot_mapping [bs]<br/>context_lens [bs]<br/>block_tables [bs,max]"]
-    I --> J["set_context(False, ...)"]
-    J --> K["model.forward()<br/>→ Attention 读取 Context"]
-    K --> L["sampler → next token"]
-    L --> M["postprocess: append token"]
-    M --> N["hash_blocks"]
-    N --> O{"status == FINISHED?"}
-    O -->|"是"| P["deallocate blocks<br/>从 running 移除"]
-    O -->|"否"| Q["回到 running 队列<br/>等待下一 decode step"]
+    A["schedule()<br/>从 running 取 seq"] --> B{"can_append?"}
+    B -->|"No"| C["preempt 队尾<br/>seq → waiting<br/>释放 KV blocks"]
+    C --> B
+    B -->|"Yes"| D["may_append<br/>len % bs == 1 时<br/>分配新 block"]
+    D --> E["scheduled_seqs<br/>is_prefill=False"]
 ```
 
 </div>
 
-<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>完整 decode 一步流程</strong>：schedule() 检查 can_append → may_append 分配 → prepare_decode 构造四件套 → set_context → model forward → sampler → postprocess 追加 token → hash_blocks。每 decode step 恰好推进 1 个 token。
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>调度阶段</strong>：FIFO 取 seq → can_append 检查 free block → 不够则 preempt 队尾（循环重试）→ 够了就 may_append 条件分配 → 交给 prepare_decode。
 </div>
 
-<!-- 完整 decode 流程图展示了从 schedule 到 postprocess 的完整一步。 -->
+<!-- 完整 decode 流程（上）：调度阶段 — can_append 检查 + preempt 抢占 + may_append 分配。5 节点，scale 0.7。-->
+
+---
+
+# 完整 decode 流程（下）：执行
+
+<div class="flex justify-center">
+
+```mermaid {scale: 0.4}
+flowchart TD
+    A["prepare_decode<br/>四件套 [bs] + block_tables"] --> B["set_context(False)"]
+    B --> C["model.forward()<br/>flash_attn_with_kvcache"]
+    C --> D["sampler → token_ids"]
+    D --> E["postprocess<br/>append_token + hash_blocks"]
+    E --> F{"FINISHED?"}
+    F -->|"否"| G["回到 running<br/>下轮 step 继续"]
+    F -->|"是"| H["deallocate<br/>从 running 移除"]
+```
+
+</div>
+
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
+  <strong>执行阶段</strong>：prepare_decode 构造四件套 → set_context 注入 → model.forward（flash_attn_with_kvcache 读 block_tables）→ sampler 采样 → postprocess 回写 + 完成判定。
+</div>
+
+<!-- 完整 decode 流程（下）：执行阶段 — prepare_decode → set_context → model.forward → sampler → postprocess → 完成判定。8 节点，scale 0.7。-->
 
 ---
 layout: default
@@ -620,41 +629,36 @@ layout: default
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.55}
+```mermaid {scale: 0.45}
 flowchart TD
-    A["prepare_block_tables(seqs)"] --> B["找 max_len = 最长 block_table"]
-    B --> C["每个 seq:<br/>block_table + [-1] * (max - len)"]
-    C --> D["torch.tensor → [bs, max_blocks] int32"]
-    D --> E["set_context(block_tables=...)"]
-    E --> F["Attention.forward()<br/>decode 分支"]
-    F --> G["flash_attn_with_kvcache<br/>(q, k_cache, v_cache,<br/>cache_seqlens=context_lens,<br/>block_table=context.block_tables)"]
-    G --> H["FlashAttention 内部：用 block_table<br/>查找每个 seq 的历史 KV 位置<br/>-1 的条目被跳过"]
-    H --> I["输出：bs 个 token 的 attention 结果"]
+    A["prepare_block_tables<br/>不等长列表<br/>→ -1 padding 补齐"] --> B["[bs, max_blocks]<br/>int32 张量"]
+    B --> C["set_context<br/>block_tables=..."]
+    C --> D["flash_attn_with_kvcache<br/>cache_seqlens=context_lens<br/>block_table=..."]
+    D --> E["按 block_table 索引<br/>查找每个 seq 的历史 KV<br/>跳过 -1 条目"]
+    E --> F["输出 attention 结果<br/>[bs, num_heads]"]
 ```
 
 </div>
 
-<div v-click class="mt-2 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-sm">
-  从 padding 到 FlashAttention 的完整链路：prepare_block_tables 将不等长 block_table 补齐 → set_context 注入 → flash_attn_with_kvcache 读取 block_table 定位每个 seq 的历史 KV cache 块。
+<div v-click class="mt-2 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r text-xs">
+  从 padding 到 FlashAttention 的完整链路：prepare_block_tables 补齐 → set_context 注入 → flash_attn_with_kvcache 通过 block_table 索引定位历史 KV，-1 条目自动跳过。
 </div>
 
-<!-- block_table 查找过程：prepare_block_tables → set_context → flash_attn_with_kvcache 使用 block_table 定位历史 KV。 -->
+<!-- block_table 查找过程：TD → LR，9 → 6 节点，scale 0.55 → 0.65。合并 padding 两步、去掉 Attention.forward 中间节点。-->
 
 ---
 layout: default
 ---
 
-# decode step 端到端时序图
+# decode step 端到端时序图（上）：调度与准备
 
 <div class="flex justify-center">
 
 ```mermaid {scale: 0.45}
 sequenceDiagram
-    participant Sched as Scheduler.schedule()
+    participant Sched as Scheduler
     participant Runner as ModelRunner
     participant CTX as Context
-    participant Model as Model<br/>+Attention
-    participant Sampler as Sampler
 
     Sched->>Sched: 从 running 取 seq
     Sched->>Sched: can_append(seq) → 检查 free block
@@ -662,37 +666,56 @@ sequenceDiagram
     Sched-->>Runner: scheduled_seqs, is_prefill=False
 
     Runner->>Runner: prepare_decode(seqs)
-    Runner->>Runner: input_ids = [seq.last_token for seq in seqs]
-    Runner->>Runner: slot_mapping = [bt[-1]*bs+last_n-1]
+    Runner->>Runner: input_ids/positions/slot_mapping/context_lens
     Runner->>Runner: block_tables = prepare_block_tables(seqs)
     Runner->>CTX: set_context(False, slot_mapping, context_lens, block_tables)
-    Note over CTX: is_prefill=False, cu_seqlens=None
+    Note over CTX: is_prefill=False<br/>cu_seqlens=None
+```
+
+</div>
+
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-xs">
+  <strong>调度与准备</strong>：scheduler 执行 can_append → may_append → 输出 scheduled_seqs → Runner 调用 prepare_decode 构造四件套 + block_tables → set_context 注入。
+</div>
+
+<!-- decode 端到端时序图（上）：调度 + prepare_decode + set_context。3 参与者，scale 0.55。-->
+
+---
+
+# decode step 端到端时序图（下）：执行与回写
+
+<div class="flex justify-center">
+
+```mermaid {scale: 0.4}
+sequenceDiagram
+    participant Runner as ModelRunner
+    participant Model as Model+Attention
+    participant Sampler as Sampler
+    participant Sched as Scheduler
 
     Runner->>Model: model(input_ids, positions)
-    Model->>Model: hidden = embedding + layers
-    Model->>Model: Attention: get_context() → block_tables
-    Note over Model: flash_attn_with_kvcache 使用<br/>block_tables 读取历史 KV
-
+    Model->>Model: embedding + Transformer layers
+    Note over Model: flash_attn_with_kvcache<br/>使用 block_tables 读取历史 KV
     Model-->>Runner: logits
 
     Runner->>Sampler: sampler(logits)
     Sampler-->>Runner: token_ids
 
-    Runner->>CTX: reset_context()
+    Runner->>Runner: reset_context()
     Runner-->>Sched: token_ids
 
-    Sched->>Sched: postprocess: append token → hash_blocks
-    Sched->>Sched: 已完成的 seq → 移除并 deallocate
-    Sched->>Sched: 未完成的 seq → 放回 running 等待下一 step
+    Sched->>Sched: postprocess: append_token → hash_blocks
+    Sched->>Sched: FINISHED → deallocate 移除
+    Sched->>Sched: 未完成 → 放回 running 等待下一 step
 ```
 
 </div>
 
-<div v-click class="mt-2 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>端到端时序</strong>：scheduler 检查 can_append/may_append → prepare_decode 构造四件套 → set_context 注入 → model.forward 使用 block_tables → sampler → reset_context → postprocess。整个周期在 engine.step() 的每次调用中完成。
+<div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-xs">
+  <strong>执行与回写</strong>：model.forward（flash_attn_with_kvcache 通过 block_tables 读历史 KV）→ sampler 采样 → reset_context → token_ids 返回 scheduler → postprocess 回写。
 </div>
 
-<!-- 端到端时序图：从 schedule 到 postprocess 的完整 decode step，突出 block_tables 在 Attention 中的使用。 -->
+<!-- decode 端到端时序图（下）：model.forward → sampler → postprocess。4 参与者，scale 0.55。-->
 
 ---
 layout: default
@@ -704,13 +727,10 @@ layout: default
 
 | 字段 | Prefill (is_prefill=True) | Decode (is_prefill=False) |
 |------|:-------------------------:|:-------------------------:|
-| `input_ids` | [Σscheduled] int64 | [bs] int64 |
-| `positions` | [Σscheduled] int64 | [bs] int64 |
+| `input_ids, positions` | [Σscheduled] int64 | [bs] int64 |
 | `slot_mapping` | [Σscheduled] int32 | [bs] int32 |
-| `cu_seqlens_q` | [bs+1] int32 | ❌ None |
-| `cu_seqlens_k` | [bs+1] int32 | ❌ None |
-| `max_seqlen_q` | int | ❌ 0 |
-| `max_seqlen_k` | int | ❌ 0 |
+| `cu_seqlens_q, cu_seqlens_k` | [bs+1] int32 | ❌ None |
+| `max_seqlen_q, max_seqlen_k` | int | ❌ 0 |
 | `context_lens` | ❌ None | [bs] int32 |
 | `block_tables` | ⚠️ 仅 prefix cache | [bs, max_blocks] int32 |
 

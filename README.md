@@ -63,7 +63,3 @@ outputs[0]["text"]
 | --------- | ----------- | -------- | --------------- |
 | vLLM      | 133,966     | 98.37    | 1361.84         |
 | Nano-vLLM | 133,966     | 93.41    | 1434.13         |
-
-## Star History
-
-[![Star History Chart](https://api.star-history.com/svg?repos=ForceInjection/nano-vllm&type=Date)](https://www.star-history.com/#ForceInjection/nano-vllm&Date)

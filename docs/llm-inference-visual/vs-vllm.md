@@ -91,3 +91,41 @@ vLLM 的 `LLM.generate` 支持 `async` 模式和 token-level streaming。nano-vL
 6. **注意力后端**：`vllm/attention/` — 对应 nano 的 `nanovllm/layers/attention.py`
 
 每个模块 nano 都提供了清晰的起点，vLLM 版本则在其上叠加了生产级特性。带着 nano 的理解去看 vLLM，可以更快穿透抽象层。
+
+---
+
+## 5. 关键代码对应表
+
+nano-vLLM 的层命名基本照搬 vLLM（`VocabParallelEmbedding`、`ColumnParallelLinear`、`RMSNorm`、`SiluAndMul`、`get_rope`、`Sampler` 等同名），因此文件级对应非常清晰。
+
+> 注：vLLM 现有 **V0**（`vllm/engine`、`vllm/core`、`vllm/worker`）和 **V1**（`vllm/v1/…`，当前默认）两套引擎。下表以 V0 路径为主，V1 差异较大处一并标注。vLLM 路径基于近期版本，跨版本可能微调。
+
+### 5.1 核心模块（建议按「学习顺序」列阅读 nano-vLLM 源码）
+
+| 顺序 | 功能模块 | nano-vLLM 源码 | vLLM 源码 | 为什么排这里 |
+| ---- | -------- | -------------- | --------- | ------------ |
+| 1 | Sequence | `engine/sequence.py` (~84 行) | `vllm/sequence.py`（V1：`vllm/v1/request.py`） | 最小数据结构，后面全依赖它 |
+| 2 | Scheduler | `engine/scheduler.py` (~92 行) | `vllm/core/scheduler.py`（V1：`vllm/v1/core/sched/scheduler.py`） | 编排 Sequence 的进出与抢占 |
+| 3 | Block Manager | `engine/block_manager.py` (~120 行) | `vllm/core/block_manager.py`（V1：`vllm/v1/core/kv_cache_manager.py`） | 调度背后的 KV 显存分块 |
+| 4 | Attention (PagedAttention) | `layers/attention.py` (~75 行，Python/Triton) | `vllm/attention/`（C++/CUDA 后端） | 消费显存块的核心算子；nano-Python vs vLLM-CUDA 对比看 |
+| 5 | Model Runner | `engine/model_runner.py` (~257 行) | `vllm/worker/model_runner.py`（V1：`vllm/v1/worker/gpu_model_runner.py`） | 拼 batch → 跑模型 → 采样的执行层 |
+| 6 | LLM Engine | `engine/llm_engine.py` (~90 行) | `vllm/engine/llm_engine.py`（V1：`vllm/v1/engine/`） | 顶层主循环，最后合龙 |
+
+**为什么是自底向上：** 后者依赖前者——Scheduler 操作 Sequence（1→2），抢占/分配走 Block Manager（2→3），Attention 消费 Block Manager 分出的块（3→4），Model Runner 调用 Attention（4→5），LLM Engine 只是把上面全部装进 `while not is_finished: step()` 循环（→6）。反过来从主循环读，一路都是黑盒；自底向上则每步都建立在已懂的基础上。
+
+### 5.2 其余对应（层 / 工具）
+
+| nano-vLLM | vLLM 对应 | 说明 |
+| --------- | --------- | ---- |
+| `llm.py` → `LLM` | `vllm/entrypoints/llm.py` → `LLM` | nano 里 `LLM` 是 `LLMEngine` 别名 |
+| `config.py` → `Config` | `vllm/config.py` → `ModelConfig`/`CacheConfig`/`SchedulerConfig`/… | nano 单 dataclass 塞全部配置 |
+| `sampling_params.py` → `SamplingParams` | `vllm/sampling_params.py` → `SamplingParams` | nano 只保留 temperature/max_tokens/ignore_eos |
+| `layers/linear.py`（各 `*ParallelLinear`） | `vllm/model_executor/layers/linear.py`（同名） | nano 去掉量化分支 |
+| `layers/embed_head.py` → `VocabParallelEmbedding`/`ParallelLMHead` | `vllm/model_executor/layers/vocab_parallel_embedding.py`（同名） | TP 词表切分 |
+| `layers/layernorm.py` → `RMSNorm` | `vllm/model_executor/layers/layernorm.py:RMSNorm` | vLLM 有 CUDA 融合核 |
+| `layers/activation.py` → `SiluAndMul` | `vllm/model_executor/layers/activation.py:SiluAndMul` | 同名 |
+| `layers/rotary_embedding.py` → `get_rope` | `vllm/model_executor/layers/rotary_embedding.py`（同名 `get_rope`） | 同名 |
+| `layers/sampler.py` → `Sampler` | `vllm/model_executor/layers/sampler.py`（V1：`vllm/v1/sample/sampler.py`） | nano 只做 temperature + Gumbel-Max |
+| `models/qwen3.py` → `Qwen3ForCausalLM` | `vllm/model_executor/models/qwen3.py` | 同名同结构 |
+| `utils/context.py` → `Context`/`set_context` | `vllm/forward_context.py` → `ForwardContext`/`set_forward_context` | **核心对应点**：全局 forward context 传 attention metadata，避免改 forward 签名 |
+| `utils/loader.py` → `load_model`/`default_weight_loader` | `vllm/model_executor/model_loader/`（`loader.py` + `weight_utils.py`） | nano 直接遍历 safetensors |

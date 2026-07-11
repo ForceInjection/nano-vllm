@@ -78,9 +78,11 @@ No test suite, linter, or type-checker is configured in this repo.
 ### Dependencies and constraints
 
 - Python `>=3.10,<3.13`, torch `>=2.4.0`, triton `>=3.0.0`, transformers `>=4.51.0`, `flash-attn`, `xxhash`
+- Default `Config`: `max_num_batched_tokens=16384`, `max_num_seqs=512`, `max_model_len=4096` (clamped to `hf_config.max_position_embeddings`), `gpu_memory_utilization=0.9`, `kvcache_block_size=256`. The model path must be a **local directory** (`assert os.path.isdir(self.model)`) — there is no HF-hub download at runtime; fetch weights beforehand (see Commands).
 - KV-cache block size must be a multiple of 256 (`kvcache_block_size % 256 == 0`)
 - Greedy sampling (temperature ≤ 1e-10) is explicitly rejected — minimum is slightly above zero
 - Only Qwen3-0.6B model architecture is implemented
 - `flash-attn` may fail to `pip install` from source (CPU/memory heavy). Download the pre-built wheel from GitHub releases matching the torch+CUDA version (e.g. `flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl`). Use `ghproxy.net` if GitHub is unreachable.
 - Course exercise scripts (`docs/llm-inference-visual/scripts/`) are self-contained but share a common `show_source()`/`show_code_block()` helper for displaying nano-vllm source snippets inline. Scripts that need the model accept `sys.argv[1]` or the `NANOVLLM_MODEL_PATH` env var.
 - `AGENTS.md` covers: agent role definitions, standard bug-fix/performance-change workflows, output templates, and documentation conventions for the visual course (Chinese prose, lesson structure, diagram conventions, 3-tier code reference system). Consult it when authoring or editing course materials under `docs/llm-inference-visual/`.
+- `docs/llm-inference-visual/slides/` is a Node/Reveal.js slide SPA (served via `serve_spa.py`) and ships a committed `node_modules/`. Exclude it from code searches — it contains thousands of vendored `.py`/`.js` files unrelated to nano-vllm.

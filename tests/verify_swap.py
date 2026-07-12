@@ -14,7 +14,7 @@ KV Cache CPU Offloading（swap-based preemption）验证脚本 —— 需要 GPU
 
 每个 LLM 在独立子进程中运行：nano-vllm 的 exit() 不释放 KV 显存，同一进程内连开多个 LLM
 会互相饿死，因此用 spawn 子进程隔离。用 num_kvcache_blocks 上限强制抢占（24GB 卡上小负载
-本来不会抢占）。纯 Python 的元数据/拷贝索引单测见 tests/test_swap_blockmanager.py。
+本来不会抢占）。纯 Python 的元数据/拷贝索引单测见同目录的 test_swap_blockmanager.py。
 """
 import os
 import sys

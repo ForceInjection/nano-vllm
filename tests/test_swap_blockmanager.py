@@ -7,7 +7,7 @@ plus the torch-only copy-indexing helper. Runnable locally without a GPU:
     python -m pytest tests/ -v
 
 GPU-level correctness (KV byte-equality, differential parity) lives in
-docs/llm-inference-visual/scripts/verify_swap.py and runs on a CUDA box.
+tests/verify_swap.py and runs on a CUDA box.
 """
 import pytest
 

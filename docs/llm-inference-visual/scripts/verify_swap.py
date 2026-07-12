@@ -8,7 +8,7 @@ KV Cache CPU Offloading（swap-based preemption）验证脚本 —— 需要 GPU
 
 覆盖设计文档 docs/design/kv-offload.md 第 10 节的 GPU 层：
   B1  KV 逐字节往返相等（最强、完全确定，与采样无关）
-  B2  RECOMPUTE / SWAP / baseline 三路差分对拍（注入 argmax 去随机性，逐 token 一致）
+  B2  单序列 swap 往返逐 token 一致（注入 argmax + batch=1，确定性）
   B3  强制大量 swap 冒烟：不死锁、能跑完
   C   观测计数器 > 0（证明确实走了 swap 路径）
 

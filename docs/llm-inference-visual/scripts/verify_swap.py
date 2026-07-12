@@ -65,7 +65,7 @@ def _gen_child(model_path, greedy, cap, cpu_offload_gb, prompts, max_tokens, q):
             _patch_argmax()
         from nanovllm import LLM, SamplingParams
         kw = dict(enforce_eager=True, tensor_parallel_size=1)
-        if cap:
+        if cap is not None:
             kw["num_kvcache_blocks"] = cap
         if cpu_offload_gb:
             kw["cpu_offload_gb"] = cpu_offload_gb
@@ -88,7 +88,11 @@ def _run_isolated(target, *args):
     q = ctx.Queue()
     p = ctx.Process(target=target, args=(*args, q))
     p.start()
-    status, payload = q.get()
+    try:
+        status, payload = q.get(timeout=600)     # avoid hanging forever on a stuck child
+    except Exception:
+        p.terminate()
+        raise RuntimeError("子进程在 600s 内无输出（疑似卡死/OOM）")
     p.join()
     if status == "err":
         raise RuntimeError("子进程失败:\n" + payload)

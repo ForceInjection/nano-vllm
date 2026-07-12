@@ -159,6 +159,7 @@ LLMEngine.step()
 ## 6. 正确性与边界
 
 - **⚠️ 拷贝顺序不可交换**：同一 decode step 内，被 `swap_out` 释放的 GPU 块会被 `may_append` 或 swap-in 目标**当场复用**。因此必须 **`swap_out 拷贝 → swap_in 拷贝 → run()`**：① `swap_out`（GPU→CPU）要在这些块被 `run()` 覆盖**之前**读出；② 若某块既是 swap_out 源又是 swap_in 目标，必须先 out 后 in。保持此固定顺序即正确，重排则静默损坏 KV。
+- **⚠️ 换入的序列不得同 step 换出（补丁）**：若一个序列在本 step 的 swap-in 阶段被换入、又在 decode 阶段被抢占，它的 GPU 块是 swap-in 目标、KV **尚未拷回**（仍是垃圾）。此时 `swap_out` 会把垃圾拷到 CPU 并丢失其真 KV。`preempt()` 必须检测"待抢占序列的块 ∈ `blocks_to_swap_in.values()`"，命中则**取消其 swap-in 并回退 RECOMPUTE**，而非 swap-out。（原 §5 只保证 out→in 顺序，未覆盖此情形——由 GPU 验证 + 代码评审发现并修复。）
 - **块-哈希生命周期**：`swap_out` 释放的 GPU 块**沿用 `deallocate` 的语义**——保留 `.hash`，由 `_allocate_block` 在复用时懒清理（`block_manager.py:47-48`）。这与现有 preempt 行为同构、数据仍有效，无需特殊处理。
 - **CUDA Graph 无冲突**：swap 发生在 step 之间、graph 捕获之外；swap-in 的序列以 decode 身份进 batch，走既有 graph 路径（`model_runner.py:199-212`）。
 - **`num_cached_tokens` 必须保留**，否则退化成重算，功能失去意义。

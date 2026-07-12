@@ -53,13 +53,13 @@ def test_swap_in_restores_block_table_and_frees_cpu():
     seq = make_seq(12)
     allocate_fresh(bm, seq)
     seq.num_cached_tokens = 12
-    bm.swap_out(seq)
+    out_mapping = bm.swap_out(seq)             # {gpu_id: cpu_id}
 
     assert bm.can_swap_in(seq)
-    mapping = bm.swap_in(seq)
+    mapping = bm.swap_in(seq)                   # {cpu_id: gpu_id}
 
-    assert len(seq.block_table) == 3                           # {cpu_id: gpu_id}
-    assert list(mapping.keys()) == list(mapping.keys())        # keys are cpu ids
+    assert len(seq.block_table) == 3
+    assert list(mapping.keys()) == list(out_mapping.values())  # swap-in keys are the swap-out CPU ids
     assert list(mapping.values()) == seq.block_table           # values become the new GPU blocks
     assert seq.seq_id not in bm.swapped_block_tables           # bookkeeping cleared
     assert len(bm.used_cpu_block_ids) == 0                     # CPU blocks released
@@ -107,15 +107,11 @@ def test_can_swap_in_false_when_gpu_blocks_insufficient():
 
 
 def test_swapped_seq_marked_and_queued_via_scheduler_preempt():
-    # Metadata-level check that preempt routes to SWAP when possible.
-    from nanovllm.engine.scheduler import Scheduler
-
-    # Build a Scheduler without going through Config/model: construct minimally.
+    # Metadata-level check that swap_out routes a seq into the swapped bookkeeping.
     bm = BlockManager(num_blocks=10, block_size=BLOCK, num_cpu_blocks=10)
     seq = make_seq(12)
     allocate_fresh(bm, seq)
 
-    # Emulate what Scheduler.preempt does with a swap-capable seq.
     assert bm.can_swap_out(seq)
     mapping = bm.swap_out(seq)
     seq.status = SequenceStatus.SWAPPED
@@ -151,6 +147,41 @@ def test_is_finished_accounts_for_swapped_queue():
 
     sched.swapped.clear()
     assert sched.is_finished()
+
+
+def test_preempt_swaps_out_normal_running_seq():
+    # A seq NOT swapped in this step is preempted via SWAP.
+    sched = _make_scheduler()
+    seq = make_seq(12)
+    allocate_fresh(sched.block_manager, seq)
+    sched.preempt(seq)
+    assert seq.status == SequenceStatus.SWAPPED
+    assert seq in sched.swapped
+    assert sched.blocks_to_swap_out                       # swapped out
+    assert sched.num_recompute_preemptions == 0
+
+
+def test_preempt_recomputes_seq_swapped_in_this_step():
+    # Regression for the critical aliasing bug: a seq whose GPU blocks are swap-in targets THIS
+    # step (KV not yet restored) must RECOMPUTE, never swap back out — otherwise swap_out would
+    # copy garbage from those fresh blocks and destroy the seq's saved KV.
+    sched = _make_scheduler()
+    seq = make_seq(12)
+    allocate_fresh(sched.block_manager, seq)
+    # simulate: this seq was just swapped in -> its blocks are values in blocks_to_swap_in
+    sched.blocks_to_swap_in = {1000 + i: b for i, b in enumerate(seq.block_table)}
+    sched.num_swapped_in_blocks = len(seq.block_table)
+
+    sched.preempt(seq)
+
+    assert seq.status == SequenceStatus.WAITING           # RECOMPUTE, not SWAP
+    assert seq in sched.waiting
+    assert not sched.blocks_to_swap_out                   # did NOT swap out (no garbage copy)
+    assert not sched.blocks_to_swap_in                    # pending swap-in cancelled
+    assert sched.num_swapped_in_blocks == 0
+    assert sched.num_recompute_preemptions == 1
+    # no swap_out source may ever be a swap_in target in the same step
+    assert set(sched.blocks_to_swap_out).isdisjoint(sched.blocks_to_swap_in.values())
 
 
 # ── A2: tensor copy indexing (torch, CPU only) ────────────────────────────────

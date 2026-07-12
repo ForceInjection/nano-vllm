@@ -95,6 +95,15 @@ class Scheduler:
         return scheduled_seqs, False
 
     def preempt(self, seq: Sequence):
+        # A sequence swapped in earlier THIS step still has un-restored (garbage) KV in its GPU
+        # blocks — the CPU->GPU copy only runs later in step(). Swapping it back out now would copy
+        # that garbage and destroy its saved KV, so cancel its pending swap-in and RECOMPUTE instead.
+        if not set(self.blocks_to_swap_in.values()).isdisjoint(seq.block_table):
+            self.blocks_to_swap_in = {c: g for c, g in self.blocks_to_swap_in.items()
+                                      if g not in set(seq.block_table)}
+            self.num_swapped_in_blocks -= len(seq.block_table)
+            self._recompute(seq)
+            return
         # Prefer SWAP (move KV to CPU, resume as decode later); fall back to RECOMPUTE when
         # CPU is full or the seq holds shared blocks (can_swap_out enforces both).
         if self.block_manager.can_swap_out(seq):
@@ -104,11 +113,14 @@ class Scheduler:
             seq.status = SequenceStatus.SWAPPED
             self.swapped.append(seq)
         else:
-            seq.status = SequenceStatus.WAITING
-            seq.is_prefill = True
-            self.block_manager.deallocate(seq)
-            self.waiting.appendleft(seq)
-            self.num_recompute_preemptions += 1
+            self._recompute(seq)
+
+    def _recompute(self, seq: Sequence):
+        seq.status = SequenceStatus.WAITING
+        seq.is_prefill = True
+        self.block_manager.deallocate(seq)
+        self.waiting.appendleft(seq)
+        self.num_recompute_preemptions += 1
 
     def postprocess(self, seqs: list[Sequence], token_ids: list[int], is_prefill: bool):
         for seq, token_id in zip(seqs, token_ids):

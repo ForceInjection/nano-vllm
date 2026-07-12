@@ -25,12 +25,16 @@ class Block:
 
 class BlockManager:
 
-    def __init__(self, num_blocks: int, block_size: int):
+    def __init__(self, num_blocks: int, block_size: int, num_cpu_blocks: int = 0):
         self.block_size = block_size
         self.blocks: list[Block] = [Block(i) for i in range(num_blocks)]
         self.hash_to_block_id: dict[int, int] = dict()
         self.free_block_ids: deque[int] = deque(range(num_blocks))
         self.used_block_ids: set[int] = set()
+        # CPU offloading: a plain parking lot of CPU block ids (no hashing / prefix-cache)
+        self.free_cpu_block_ids: deque[int] = deque(range(num_cpu_blocks))
+        self.used_cpu_block_ids: set[int] = set()
+        self.swapped_block_tables: dict[int, list[int]] = dict()  # seq_id -> cpu block ids
 
     @classmethod
     def compute_hash(cls, token_ids: list[int], prefix: int = -1):
@@ -118,3 +122,48 @@ class BlockManager:
             h = self.compute_hash(token_ids, h)
             block.update(h, token_ids)
             self.hash_to_block_id[h] = block.block_id
+
+    def _allocate_cpu_block(self) -> int:
+        cpu_id = self.free_cpu_block_ids.popleft()
+        self.used_cpu_block_ids.add(cpu_id)
+        return cpu_id
+
+    def _deallocate_cpu_block(self, cpu_id: int):
+        self.used_cpu_block_ids.remove(cpu_id)
+        self.free_cpu_block_ids.append(cpu_id)
+
+    def can_swap_out(self, seq: Sequence) -> bool:
+        # Only swap sequences whose blocks are all privately owned (ref_count == 1);
+        # a shared block cannot be evicted while another sequence still needs it in GPU.
+        if len(self.free_cpu_block_ids) < len(seq.block_table):
+            return False
+        return all(self.blocks[block_id].ref_count == 1 for block_id in seq.block_table)
+
+    def swap_out(self, seq: Sequence) -> dict[int, int]:
+        assert seq.seq_id not in self.swapped_block_tables
+        mapping = {}
+        cpu_block_ids = []
+        for block_id in seq.block_table:
+            cpu_id = self._allocate_cpu_block()
+            mapping[block_id] = cpu_id
+            cpu_block_ids.append(cpu_id)
+            block = self.blocks[block_id]
+            block.ref_count -= 1
+            assert block.ref_count == 0
+            self._deallocate_block(block_id)  # frees the GPU block, keeps block.hash (lazy cleanup)
+        self.swapped_block_tables[seq.seq_id] = cpu_block_ids
+        seq.block_table = []  # num_cached_tokens is intentionally preserved
+        return mapping
+
+    def can_swap_in(self, seq: Sequence) -> bool:
+        return len(self.free_block_ids) >= len(self.swapped_block_tables[seq.seq_id])
+
+    def swap_in(self, seq: Sequence) -> dict[int, int]:
+        cpu_block_ids = self.swapped_block_tables.pop(seq.seq_id)
+        mapping = {}
+        for cpu_id in cpu_block_ids:
+            block_id = self._allocate_block()
+            mapping[cpu_id] = block_id
+            seq.block_table.append(block_id)
+            self._deallocate_cpu_block(cpu_id)
+        return mapping

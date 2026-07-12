@@ -18,6 +18,7 @@ KV Cache CPU Offloading（swap-based preemption）验证脚本 —— 需要 GPU
 """
 import os
 import sys
+import queue
 import multiprocessing as mp
 
 
@@ -90,8 +91,9 @@ def _run_isolated(target, *args):
     p.start()
     try:
         status, payload = q.get(timeout=600)     # avoid hanging forever on a stuck child
-    except Exception:
+    except queue.Empty:
         p.terminate()
+        p.join()
         raise RuntimeError("子进程在 600s 内无输出（疑似卡死/OOM）")
     p.join()
     if status == "err":

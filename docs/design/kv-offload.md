@@ -227,7 +227,22 @@ LLMEngine.step()
 
 ### E. 性能佐证（非断言，报告用）
 
-同压力下 SWAP vs RECOMPUTE，统计**重算的 prefill token 数**与吞吐。swap 的卖点即重算 token↓、吞吐↑，用数据讲出来，呼应 README 的 benchmark 风格。
+同压力下 SWAP vs RECOMPUTE，统计**重算的 prefill token 数**与吞吐。脚本：`docs/llm-inference-visual/scripts/bench_swap.py`。
+
+**实测（RTX 3090 / Qwen3-0.6B，32 序列 × (prompt≈210 + decode 256)，cap=8 强制抢占）：**
+
+| 配置                        | 墙钟(s) | 吞吐(tok/s) | 重算抢占 | swap_out/in 块 |
+| --------------------------- | ------- | ----------- | -------- | -------------- |
+| baseline（无压力, cap=512） | 10.98   | 746.0       | 0        | 0 / 0          |
+| RECOMPUTE（cap=8）          | 64.22   | 127.6       | 16       | 0 / 0          |
+| SWAP（cap=8, offload=4）    | 64.88   | 126.3       | 8        | 16 / 8         |
+
+**结论（诚实的交叉点认知）：**
+
+- 机制生效：RECOMPUTE 16 次重算；SWAP 16/8 块搬运 + 8 次护栏回退重算（swapped-in 又被抢占）。
+- 但 0.6B 上 SWAP ≈ RECOMPUTE（差 <1%，噪声内）：**模型太小 → PCIe 搬运成本 ≈ 重算成本**，swap 省下的重算被搬运抵消。
+- 最扎眼的是抢占本身的代价：有压力时吞吐 746 → ~127（掉到 1/6），两策略都一样惨——**首要目标是别抢占**。
+- swap 的收益 = 省下的重算（∝ 模型规模 × prompt 长度）− PCIe 搬运（∝ KV 字节/带宽）。小模型打平，大模型（14B/32B，重算长 prefill 极贵）才大胜——这也解释了 vLLM 为何在大模型场景才把 swap 当默认手段。
 
 ### 测试矩阵速览
 

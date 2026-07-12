@@ -1,7 +1,6 @@
 # 设计文档：KV Cache CPU Offloading
 
 > 目标：为 nano-vllm 增加 KV Cache 的 CPU 卸载能力——将被抢占序列的 KV Cache 迁移至 CPU 内存（swap out），并在重新调度时迁回 GPU（swap in），以替代当前"丢弃并重算 prefill"的做法。设计参考 vLLM，但在实现上以可读性为优先。
-
 > 状态：P1 已实现并在 RTX 3090 上通过验证（B1/B2/B3/C）。本文兼作设计说明与实现记录，包含实现过程中经 GPU 验证与代码评审发现并修复的问题。
 
 ---
@@ -215,7 +214,7 @@ LLMEngine.step()
 
 ### B. 集成测试（需在 3090 上运行）
 
-落地文件：`docs/llm-inference-visual/scripts/verify_swap.py`（沿用 `verify_nanovllm.py` 风格，argv/env 传模型路径）。
+落地文件：`tests/verify_swap.py`（沿用 `verify_nanovllm.py` 风格，argv/env 传模型路径；非 pytest 收集，需 GPU + 模型手动运行）。
 
 - **B1. KV 逐字节往返相等（最强、完全确定）**：以已知随机值填充 `kv_cache` 若干块 → `swap_out` 至 CPU → `swap_in` 至另一批 GPU 块 → 断言 `torch.equal`。直接验证拷贝与映射无损，与采样无关。
 - **B2. 单序列 swap 往返，逐 token 一致（确定性）**：注入 argmax 贪心采样（monkeypatch sampler）以消除采样随机性。以单条序列驱动 `step()`，解码若干步后强制 `swap_out` 至 CPU、再由调度器 `swap_in` 迁回，继续解码至结束；与同一序列不经 swap 的参照输出逐 token 对比。全程 batch 恒为 1，数值不受调度顺序影响，任何差异即为 KV 损坏。
@@ -234,7 +233,7 @@ LLMEngine.step()
 
 ### E. 性能佐证（报告用，非断言）
 
-同压力下比较 SWAP 与 RECOMPUTE 的吞吐与 prefill 工作量。脚本：`docs/llm-inference-visual/scripts/bench_swap.py`。
+同压力下比较 SWAP 与 RECOMPUTE 的吞吐与 prefill 工作量。脚本：`tests/bench_swap.py`。
 
 **实测（RTX 3090 / Qwen3-0.6B，32 序列 × (prompt≈210 + decode 256)，cap=8 强制抢占）：**
 

@@ -40,7 +40,7 @@ python verify_nanovllm.py /path/to/model
 python benchmark.py /path/to/model --num-seqs 64 --max-input 512 --max-output 256
 ```
 
-No linter or type-checker is configured. Unit tests live in `tests/` (pytest, opt-in dep): `pip install -e ".[test]"` then `python -m pytest tests/ -v`. These are GPU-free — `nanovllm/__init__.py` imports `LLM` lazily (PEP 562) so lightweight submodules (e.g. `nanovllm.engine.block_manager`) import without `flash_attn`. GPU-level correctness scripts remain under `docs/llm-inference-visual/scripts/` (e.g. `verify_swap.py`).
+No linter or type-checker is configured. Unit tests live in `tests/` (pytest, opt-in dep): `pip install -e ".[test]"` then `python -m pytest tests/ -v`. These are GPU-free — `nanovllm/__init__.py` imports `LLM` lazily (PEP 562) so lightweight submodules (e.g. `nanovllm.engine.block_manager`) import without `flash_attn`. GPU-level correctness/benchmark scripts for the engine also live in `tests/` (`verify_swap.py`, `bench_swap.py`; not pytest-collected, run manually with a model path). Course-provided verify/benchmark tools remain under `docs/llm-inference-visual/scripts/` (`verify_nanovllm.py`, `benchmark.py`).
 
 ## Architecture
 

@@ -6,6 +6,7 @@ from multiprocessing.shared_memory import SharedMemory
 
 from nanovllm.config import Config
 from nanovllm.engine.sequence import Sequence
+from nanovllm.engine.kv_swap import swap_blocks
 from nanovllm.models.qwen3 import Qwen3ForCausalLM
 from nanovllm.layers.sampler import Sampler
 from nanovllm.utils.context import set_context, get_context, reset_context
@@ -110,7 +111,10 @@ class ModelRunner:
         num_kv_heads = hf_config.num_key_value_heads // self.world_size
         head_dim = getattr(hf_config, "head_dim", hf_config.hidden_size // hf_config.num_attention_heads)
         block_bytes = 2 * hf_config.num_hidden_layers * self.block_size * num_kv_heads * head_dim * hf_config.dtype.itemsize
-        config.num_kvcache_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
+        num_blocks = int(total * config.gpu_memory_utilization - used - peak + current) // block_bytes
+        if config.num_kvcache_blocks > 0:
+            num_blocks = min(num_blocks, config.num_kvcache_blocks)  # allow callers to cap capacity (tests/experiments)
+        config.num_kvcache_blocks = num_blocks
         assert config.num_kvcache_blocks > 0
         self.kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_kvcache_blocks, self.block_size, num_kv_heads, head_dim)
         layer_id = 0
@@ -119,6 +123,19 @@ class ModelRunner:
                 module.k_cache = self.kv_cache[0, layer_id]
                 module.v_cache = self.kv_cache[1, layer_id]
                 layer_id += 1
+        # CPU offloading mirror: same layout, one shard per rank, pinned for fast DMA.
+        self.cpu_kv_cache = None
+        config.num_cpu_kvcache_blocks = int(config.cpu_offload_gb * 2**30) // block_bytes if config.cpu_offload_gb > 0 else 0
+        if config.num_cpu_kvcache_blocks > 0:
+            self.cpu_kv_cache = torch.empty(2, hf_config.num_hidden_layers, config.num_cpu_kvcache_blocks, self.block_size, num_kv_heads, head_dim, device="cpu", pin_memory=True)
+
+    def swap_out(self, mapping: dict[int, int]):
+        # gpu -> cpu; mapping is {gpu_block_id: cpu_block_id}. Must run before swap_in / run() (see design R1).
+        swap_blocks(self.kv_cache, self.cpu_kv_cache, mapping)
+
+    def swap_in(self, mapping: dict[int, int]):
+        # cpu -> gpu; mapping is {cpu_block_id: gpu_block_id}.
+        swap_blocks(self.cpu_kv_cache, self.kv_cache, mapping)
 
     def prepare_block_tables(self, seqs: list[Sequence]):
         max_len = max(len(seq.block_table) for seq in seqs)

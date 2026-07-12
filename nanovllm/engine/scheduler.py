@@ -12,12 +12,20 @@ class Scheduler:
         self.max_num_batched_tokens = config.max_num_batched_tokens
         self.eos = config.eos
         self.block_size = config.kvcache_block_size
-        self.block_manager = BlockManager(config.num_kvcache_blocks, config.kvcache_block_size)
+        self.block_manager = BlockManager(config.num_kvcache_blocks, config.kvcache_block_size, config.num_cpu_kvcache_blocks)
         self.waiting: deque[Sequence] = deque()
         self.running: deque[Sequence] = deque()
+        self.swapped: deque[Sequence] = deque()
+        # Filled during schedule(); consumed by LLMEngine.step() before running the model.
+        self.blocks_to_swap_out: dict[int, int] = {}
+        self.blocks_to_swap_in: dict[int, int] = {}
+        # Cumulative observability counters (used by verify_swap.py to assert the swap path ran).
+        self.num_swapped_out_blocks = 0
+        self.num_swapped_in_blocks = 0
+        self.num_recompute_preemptions = 0
 
     def is_finished(self):
-        return not self.waiting and not self.running
+        return not self.waiting and not self.running and not self.swapped
 
     def add(self, seq: Sequence):
         self.waiting.append(seq)
@@ -25,6 +33,8 @@ class Scheduler:
     def schedule(self) -> tuple[list[Sequence], bool]:
         scheduled_seqs = []
         num_batched_tokens = 0
+        self.blocks_to_swap_out = {}
+        self.blocks_to_swap_in = {}
 
         # prefill
         while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
@@ -54,6 +64,18 @@ class Scheduler:
         if scheduled_seqs:
             return scheduled_seqs, True
 
+        # swap-in (decode step only): pull swapped-out seqs back while GPU blocks are free.
+        # Essential for liveness: if every running seq was swapped out, this refills `running`.
+        while self.swapped and len(self.running) < self.max_num_seqs:
+            seq = self.swapped[0]
+            if not self.block_manager.can_swap_in(seq):
+                break
+            self.blocks_to_swap_in.update(self.block_manager.swap_in(seq))
+            self.num_swapped_in_blocks += len(seq.block_table)
+            seq.status = SequenceStatus.RUNNING
+            self.swapped.popleft()
+            self.running.append(seq)
+
         # decode
         while self.running and len(scheduled_seqs) < self.max_num_seqs:
             seq = self.running.popleft()
@@ -73,10 +95,20 @@ class Scheduler:
         return scheduled_seqs, False
 
     def preempt(self, seq: Sequence):
-        seq.status = SequenceStatus.WAITING
-        seq.is_prefill = True
-        self.block_manager.deallocate(seq)
-        self.waiting.appendleft(seq)
+        # Prefer SWAP (move KV to CPU, resume as decode later); fall back to RECOMPUTE when
+        # CPU is full or the seq holds shared blocks (can_swap_out enforces both).
+        if self.block_manager.can_swap_out(seq):
+            mapping = self.block_manager.swap_out(seq)
+            self.blocks_to_swap_out.update(mapping)
+            self.num_swapped_out_blocks += len(mapping)
+            seq.status = SequenceStatus.SWAPPED
+            self.swapped.append(seq)
+        else:
+            seq.status = SequenceStatus.WAITING
+            seq.is_prefill = True
+            self.block_manager.deallocate(seq)
+            self.waiting.appendleft(seq)
+            self.num_recompute_preemptions += 1
 
     def postprocess(self, seqs: list[Sequence], token_ids: list[int], is_prefill: bool):
         for seq, token_id in zip(seqs, token_ids):

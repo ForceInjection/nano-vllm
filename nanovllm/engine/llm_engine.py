@@ -49,6 +49,11 @@ class LLMEngine:
     def step(self):
         seqs, is_prefill = self.scheduler.schedule()
         num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
+        # Order is mandatory (design R1): swap_out (GPU->CPU) before swap_in (CPU->GPU) before run().
+        if self.scheduler.blocks_to_swap_out:
+            self.model_runner.call("swap_out", self.scheduler.blocks_to_swap_out)
+        if self.scheduler.blocks_to_swap_in:
+            self.model_runner.call("swap_in", self.scheduler.blocks_to_swap_in)
         token_ids = self.model_runner.call("run", seqs, is_prefill)
         self.scheduler.postprocess(seqs, token_ids, is_prefill)
         outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]

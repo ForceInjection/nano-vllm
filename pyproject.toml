@@ -22,6 +22,9 @@ dependencies = [
 [project.urls]
 Homepage="https://github.com/GeeeekExplorer/nano-vllm"
 
+[project.optional-dependencies]
+test = ["pytest"]
+
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["nanovllm*"]

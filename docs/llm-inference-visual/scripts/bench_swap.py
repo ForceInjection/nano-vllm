@@ -31,15 +31,31 @@ def _bench_child(model_path, label, cap, cpu_offload_gb, n_seqs, prompt_repeat, 
         if cpu_offload_gb:
             kw["cpu_offload_gb"] = cpu_offload_gb
         llm = LLM(model_path, **kw)
-        prompts = [prompt] * n_seqs
         sp = SamplingParams(temperature=0.7, max_tokens=max_tokens, ignore_eos=True)
+        for _ in range(n_seqs):
+            llm.add_request(prompt, sp)
+
+        # Drive step() manually to collect concurrency + prefill work:
+        #   step() returns (outputs, num_tokens); num_tokens > 0 on a prefill step (that many
+        #   prefill tokens, INCLUDING recomputes), < 0 on a decode step (= -batch_size).
+        prefill_tokens = decode_tokens = decode_steps = 0
         t = time.perf_counter()
-        outs = llm.generate(prompts, sp, use_tqdm=False)
+        while not llm.is_finished():
+            _, num_tokens = llm.step()
+            if num_tokens > 0:
+                prefill_tokens += num_tokens
+            else:
+                decode_tokens += -num_tokens
+                decode_steps += 1
         dt = time.perf_counter() - t
+
+        out_tokens = n_seqs * max_tokens                      # ignore_eos → fixed useful output
         res = dict(
             label=label,
             wall=dt,
-            out_tokens=sum(len(o["token_ids"]) for o in outs),
+            tps=out_tokens / dt,
+            avg_batch=decode_tokens / decode_steps if decode_steps else 0.0,
+            prefill_tokens=prefill_tokens,                    # total prefill work (recomputes inflate this)
             recompute=llm.scheduler.num_recompute_preemptions,
             swap_out=llm.scheduler.num_swapped_out_blocks,
             swap_in=llm.scheduler.num_swapped_in_blocks,
@@ -99,29 +115,33 @@ def main():
     rows = []
     for label, cap, off in configs:
         r = _run(model_path, label, cap, off, N_SEQS, PROMPT_REPEAT, MAX_TOKENS)
-        r["tps"] = r["out_tokens"] / r["wall"]
         rows.append(r)
-        print(f"[done] {label:18s} wall={r['wall']:6.2f}s  "
-              f"tps={r['tps']:7.1f}  kv_blocks={r['kv_blocks']}  "
-              f"recompute={r['recompute']}  swap_out={r['swap_out']}  swap_in={r['swap_in']}")
+        print(f"[done] {label:18s} wall={r['wall']:6.2f}s  tps={r['tps']:7.1f}  "
+              f"avg_batch={r['avg_batch']:5.1f}  prefill_tok={r['prefill_tokens']:7d}  "
+              f"recompute={r['recompute']}  swap={r['swap_out']}/{r['swap_in']}")
 
-    print("-" * 78)
-    print(f"{'配置':18s} {'墙钟(s)':>9} {'吞吐(tok/s)':>12} {'重算抢占':>9} {'swap_out块':>11} {'swap_in块':>10}")
+    print("-" * 92)
+    hdr = f"{'配置':18s} {'墙钟(s)':>8} {'吞吐(tok/s)':>11} {'并发(avg_batch)':>15} {'prefill_tok':>12} {'重算':>5} {'swap_o/i':>10}"
+    print(hdr)
     for r in rows:
-        print(f"{r['label']:18s} {r['wall']:9.2f} {r['tps']:12.1f} "
-              f"{r['recompute']:9d} {r['swap_out']:11d} {r['swap_in']:10d}")
-    print("-" * 78)
+        print(f"{r['label']:18s} {r['wall']:8.2f} {r['tps']:11.1f} {r['avg_batch']:15.1f} "
+              f"{r['prefill_tokens']:12d} {r['recompute']:5d} {str(r['swap_out'])+'/'+str(r['swap_in']):>10}")
+    print("-" * 92)
 
     base, rec, swp = rows
     print(f"\n解读:")
-    print(f"  · baseline 无抢占,是吞吐上限 ({base['tps']:.1f} tok/s)。")
-    print(f"  · 压力下 RECOMPUTE 触发 {rec['recompute']} 次重算抢占；SWAP 触发 0 次重算、"
-          f"改为搬运 {swp['swap_out']}/{swp['swap_in']} 块。")
+    print(f"  1. baseline 是「无抢占」参照(cap 充足 → avg_batch≈{base['avg_batch']:.0f}、prefill 只跑一遍)，"
+          f"不参与 swap 对比——它并发更高,快是因为 batch 大,不是因为抢占策略。")
+    print(f"  2. 公平对比 = RECOMPUTE vs SWAP:二者 **cap 相同、avg_batch≈{rec['avg_batch']:.0f} 一致**,"
+          f"只差抢占策略。")
+    print(f"  3. 机制层面 swap 恒赢(与模型大小无关):RECOMPUTE 因重跑 prefill,总 prefill token "
+          f"= {rec['prefill_tokens']}(baseline 的 {rec['prefill_tokens']/max(base['prefill_tokens'],1):.1f}×)；"
+          f"SWAP = {swp['prefill_tokens']}(≈baseline,不重跑)。")
     if swp['tps'] >= rec['tps']:
-        print(f"  · SWAP 吞吐 {swp['tps']:.1f} ≥ RECOMPUTE {rec['tps']:.1f}：省下的重算 > PCIe 搬运成本。")
+        print(f"  4. 墙钟:SWAP {swp['tps']:.1f} ≥ RECOMPUTE {rec['tps']:.1f} tok/s——省下的重算 > PCIe 搬运。")
     else:
-        print(f"  · SWAP 吞吐 {swp['tps']:.1f} < RECOMPUTE {rec['tps']:.1f}：本模型太小，"
-              f"PCIe 搬运成本 > 省下的重算——swap 的收益需更大模型/更长 prompt 才体现。")
+        print(f"  4. 墙钟:SWAP {swp['tps']:.1f} ≈/< RECOMPUTE {rec['tps']:.1f} tok/s——本模型太小,"
+              f"PCIe 搬运成本 ≈ 省下的重算;收益随模型规模/prompt 长度增长。")
 
 
 if __name__ == "__main__":

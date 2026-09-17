@@ -51,7 +51,7 @@ python benchmark.py /path/to/model --num-seqs 64 --max-input 512 --max-output 25
 | ---------------------------------------------------- | -------- | ---------------- | ------------------------------------------------------------------------ |
 | [L01_end_to_end.py](./L01_end_to_end.py)             | 第 1 课  | GPU + 模型       | 端到端推理链路：`LLM.generate` → `step` 三段式 → 返回结构                |
 | [L02_sequence.py](./L02_sequence.py)                 | 第 2 课  | nano-vllm (CPU)  | Sequence 字段、block 切分公式、pickle 协议                               |
-| [L03_scheduler.py](./L03_scheduler.py)               | 第 3 课  | nano-vllm (CPU)  | prefill 批拼接、chunked prefill、decode + preempt，含真实 Scheduler 对比 |
+| [L03_scheduler.py](./L03_scheduler.py)               | 第 3 课  | nano-vllm (CPU)  | prefill 批拼接、chunked prefill、decode + preempt（SWAP/RECOMPUTE）、swap 元数据往返；§7 真实 Scheduler 对比 + 强制抢占的 SWAP 全流程（含 RECOMPUTE 对照） |
 | [L04_block_manager.py](./L04_block_manager.py)       | 第 4 课  | nano-vllm (CPU)  | 链式哈希、prefix cache 命中、ref_count 引用计数                          |
 | [L05_prefill_batching.py](./L05_prefill_batching.py) | 第 5 课  | torch + 模型路径 | cu_seqlens 展平拼接、slot_mapping 构造、Context 注入                     |
 | [L06_decode.py](./L06_decode.py)                     | 第 6 课  | torch + 模型路径 | decode slot 公式、may_append 触发条件、prefill/decode 张量对比           |

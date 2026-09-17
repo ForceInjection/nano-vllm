@@ -84,21 +84,21 @@ flowchart LR
 
 ### 3.1 input_ids 与 positions：展平拼接
 
-[`prepare_prefill`](../../nanovllm/engine/model_runner.py#L129-L170) 会对每个 seq 取出"本次要处理"的 token 区间 `[start:end)`，并把这些片段依次 append 到一个 Python 列表中，最终转为 1D 张量 `input_ids`；`positions` 则是每个 token 的位置索引，范围与 `[start:end)` 对齐。
+[`prepare_prefill`](../../nanovllm/engine/model_runner.py#L146-L187) 会对每个 seq 取出"本次要处理"的 token 区间 `[start:end)`，并把这些片段依次 append 到一个 Python 列表中，最终转为 1D 张量 `input_ids`；`positions` 则是每个 token 的位置索引，范围与 `[start:end)` 对齐。
 
-- 关键输入：`seq.num_cached_tokens` 与 `seq.num_scheduled_tokens`（由调度器设置，见 [scheduler.py:L29-L52](../../nanovllm/engine/scheduler.py#L29-L52)）
+- 关键输入：`seq.num_cached_tokens` 与 `seq.num_scheduled_tokens`（由调度器设置，见 [scheduler.py:L40-L62](../../nanovllm/engine/scheduler.py#L40-L62)）
 
 ### 3.2 cu_seqlens_q 与 max_seqlen_q：查询侧变长边界
 
-[`cu_seqlens_q`](../../nanovllm/engine/model_runner.py#L132) 是一个长度为 `bs+1` 的前缀和数组（cumulative sum，和算法课里的含义相同），标记每个 seq 的 query token 在展平 `input_ids` 里的起止偏移；[`max_seqlen_q`](../../nanovllm/engine/model_runner.py#L134) 是本 batch（把多个请求合并处理以提高效率）中 query 的最大长度，用于算子侧的边界优化。
+[`cu_seqlens_q`](../../nanovllm/engine/model_runner.py#L149) 是一个长度为 `bs+1` 的前缀和数组（cumulative sum，和算法课里的含义相同），标记每个 seq 的 query token 在展平 `input_ids` 里的起止偏移；[`max_seqlen_q`](../../nanovllm/engine/model_runner.py#L151) 是本 batch（把多个请求合并处理以提高效率）中 query 的最大长度，用于算子侧的边界优化。
 
 ### 3.3 cu_seqlens_k 与 max_seqlen_k：键值侧可能更长（prefix cache）
 
-在 prefix cache 场景下，某些 seq 的 key/value 侧长度 `seqlen_k` 可以大于本次 query 的长度 `seqlen_q`，因为 KV cache（存储注意力计算中间结果的缓存）里已经有更长的历史前缀可用。代码用 [`if cu_seqlens_k[-1] > cu_seqlens_q[-1]`](../../nanovllm/engine/model_runner.py#L162-L163) 判断是否需要构造 `block_tables`。
+在 prefix cache 场景下，某些 seq 的 key/value 侧长度 `seqlen_k` 可以大于本次 query 的长度 `seqlen_q`，因为 KV cache（存储注意力计算中间结果的缓存）里已经有更长的历史前缀可用。代码用 [`if cu_seqlens_k[-1] > cu_seqlens_q[-1]`](../../nanovllm/engine/model_runner.py#L179-L180) 判断是否需要构造 `block_tables`。
 
 ### 3.4 slot_mapping 与 block_tables：把"逻辑 token"映射到"物理 KV cache"
 
-[`slot_mapping`](../../nanovllm/engine/model_runner.py#L149-L161) 是一个长度为 `N` 的 int32 张量（N 为本次 prefill 处理的 token 总数），其中每个元素是该 token 在 KV cache 中应写入的"slot（位置编号）"。当启用 prefix cache 时，会额外构造 [`block_tables`](../../nanovllm/engine/model_runner.py#L162-L163)（每个 seq 的 block_id 列表 padding 成矩阵），供注意力算子在访问 cache 时查表。
+[`slot_mapping`](../../nanovllm/engine/model_runner.py#L168-L178) 是一个长度为 `N` 的 int32 张量（N 为本次 prefill 处理的 token 总数），其中每个元素是该 token 在 KV cache 中应写入的"slot（位置编号）"。当启用 prefix cache 时，会额外构造 [`block_tables`](../../nanovllm/engine/model_runner.py#L179-L180)（每个 seq 的 block_id 列表 padding 成矩阵），供注意力算子在访问 cache 时查表。
 
 ```python
 # prepare_prefill 中的 slot_mapping 构造：逐 block 展开 [start, end) 区间到 "block_id * block_size + 块内偏移"。
@@ -117,7 +117,7 @@ for i in range(start_block, end_block):
     slot_mapping.extend(range(slot_start, slot_end))
 ```
 
-- 上下文注入：[`set_context(...)`](../../nanovllm/engine/model_runner.py#L169) 与 [`context.py:L5-L27`](../../nanovllm/utils/context.py#L5-L27)
+- 上下文注入：[`set_context(...)`](../../nanovllm/engine/model_runner.py#L186) 与 [`context.py:L5-L27`](../../nanovllm/utils/context.py#L5-L27)
 
 ---
 
@@ -151,8 +151,8 @@ print("positions   :", pos)   # 期望：[0, 1, 2, 4, 5]
 ```
 
 - 验收要点（对应实现）：
-  - `cu_seqlens_q` 以 0 开头，每个元素是前面所有 seq 的 query 累计长度（见 [model_runner.py:L132-L146](../../nanovllm/engine/model_runner.py#L132-L146)）
-  - `positions` 在 prefill 下为 `range(seq.num_cached_tokens, seq.num_cached_tokens + seq.num_scheduled_tokens)` 的展平拼接，因此 prefix cache 命中时起点会跳过已缓存 token（见 [model_runner.py:L129-L148](../../nanovllm/engine/model_runner.py#L129-L148)）
+  - `cu_seqlens_q` 以 0 开头，每个元素是前面所有 seq 的 query 累计长度（见 [model_runner.py:L149-L163](../../nanovllm/engine/model_runner.py#L149-L163)）
+  - `positions` 在 prefill 下为 `range(seq.num_cached_tokens, seq.num_cached_tokens + seq.num_scheduled_tokens)` 的展平拼接，因此 prefix cache 命中时起点会跳过已缓存 token（见 [model_runner.py:L155-L161](../../nanovllm/engine/model_runner.py#L155-L161)）
 
 ### 4.2 课后自测题
 

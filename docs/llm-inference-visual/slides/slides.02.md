@@ -22,7 +22,7 @@ layout: default
 # 本课在课程中的位置
 
 <div class="text-sm opacity-80 mt-2 mb-6">
-<code>Sequence</code> 是每个推理请求的"身份证"——承载 prompt 与生成 token，记录调度计数器与 KV cache 映射，其生命周期状态（WAITING/RUNNING/FINISHED）在调度器里不断变化。掌握 Sequence，后续课程的调度与 KV cache 管理都有了落点。
+<code>Sequence</code> 是每个推理请求的"身份证"——承载 prompt 与生成 token，记录调度计数器与 KV cache 映射，其生命周期状态（WAITING/RUNNING/SWAPPED/FINISHED）在调度器里不断变化。掌握 Sequence，后续课程的调度与 KV cache 管理都有了落点。
 </div>
 
 <div style="height: 30px;"></div>
@@ -149,7 +149,7 @@ layout: default
     <li><code>num_cached_tokens</code> — 已完成的 token</li>
     <li><code>num_scheduled_tokens</code> — 本轮要算的</li>
     <li><code>num_tokens</code> — 总 token 数（动态增长）</li>
-    <li><code>status</code> — WAITING/RUNNING/FINISHED</li>
+    <li><code>status</code> — WAITING/RUNNING/SWAPPED/FINISHED</li>
   </ul>
 </div>
 <div class="bg-purple-500/10 p-4 rounded border-l-3 border-purple-500">
@@ -163,14 +163,14 @@ layout: default
 
 
 <!--
-Sequence 的三类信息用三个彩色卡片呈现：蓝色 Token 数据、绿色调度计数器、紫色 KV Cache 映射。用「档案袋」比喻——请求从入门到完成，所有信息装在 Sequence 里。打开 sequence.py L14-L32 对照查看。
+Sequence 的三类信息用三个彩色卡片呈现：蓝色 Token 数据、绿色调度计数器、紫色 KV Cache 映射。用「档案袋」比喻——请求从入门到完成，所有信息装在 Sequence 里。打开 sequence.py L15-L32 对照查看。
 -->
 
 ---
 layout: default
 ---
 
-# 2.1 状态机：WAITING → RUNNING → FINISHED
+# 2.1 状态机：WAITING → RUNNING → SWAPPED → FINISHED
 
 <div class="flex justify-center">
 
@@ -179,7 +179,9 @@ stateDiagram-v2
     [*] --> WAITING: add_request
     WAITING --> RUNNING: schedule 首次选中 + allocate
     RUNNING --> RUNNING: decode 每步 may_append
-    RUNNING --> WAITING: KV 不足 preempt + deallocate
+    RUNNING --> SWAPPED: preempt + swap_out（KV 驻留 CPU）
+    RUNNING --> WAITING: preempt + recompute（丢弃 KV）
+    SWAPPED --> RUNNING: swap_in（GPU 有空块，断点续跑）
     RUNNING --> FINISHED: EOS / max_tokens + deallocate
     FINISHED --> [*]
 ```
@@ -187,12 +189,12 @@ stateDiagram-v2
 </div>
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  类比操作系统的进程<strong>三态模型</strong>：WAITING = ready、RUNNING = running、FINISHED = terminated。preempt 类似被换出（swap out）。
+  类比操作系统的进程<strong>状态模型</strong>：WAITING = ready、RUNNING = running、SWAPPED = swapped out（被换出到交换区）、FINISHED = terminated。抢占后去哪由资源决定：CPU 卸载开启（<code>cpu_offload_gb&gt;0</code>）优先 SWAP（KV 搬到 CPU，回来断点续跑），否则 RECOMPUTE 退回 WAITING（丢弃 KV 重算）。
 </div>
 
 
 <!--
-状态机图展示 Sequence 完整生命周期。关键点是 preempt 状态转换（RUNNING → WAITING），这是调度策略的核心。可参考 02-sequence-lifecycle.md §2.1。
+状态机图展示 Sequence 完整生命周期。关键点是 preempt 的两条出路：SWAP（RUNNING → SWAPPED，KV 驻留 CPU，swap_in 后断点续跑）与 RECOMPUTE（RUNNING → WAITING，丢弃 KV 重算）。这是调度策略的核心。可参考 02-sequence-lifecycle.md §2.1。
 -->
 
 ---
@@ -206,10 +208,12 @@ layout: default
 | 转换 | 触发者 | 代码位置 |
 |------|--------|----------|
 | `→ WAITING` | `Scheduler.add()` | `scheduler.py` |
-| `WAITING → RUNNING` | `schedule()` prefill 分支分配 block | `scheduler.py:L29-L56` |
-| `RUNNING → RUNNING` | decode 每步 `may_append` | `scheduler.py:L57-L73` |
-| `RUNNING → WAITING` | `Scheduler.preempt()` | `scheduler.py:L75-L79` |
-| `RUNNING → FINISHED` | `postprocess()` 判定 EOS/max_tokens | `scheduler.py:L81-L92` |
+| `WAITING → RUNNING` | `schedule()` prefill 分支分配 block | `scheduler.py:L40-L62` |
+| `RUNNING → RUNNING` | decode 每步 `may_append` | `scheduler.py:L80-L94` |
+| `RUNNING → SWAPPED` | `Scheduler.preempt()` SWAP 路径（KV 搬 CPU） | `scheduler.py:L97-L116` |
+| `SWAPPED → RUNNING` | swap-in 阶段：GPU 有空块则迁回 | `scheduler.py:L67-L77` |
+| `RUNNING → WAITING` | `Scheduler.preempt()` RECOMPUTE 兜底（`_recompute`） | `scheduler.py:L118-L123` |
+| `RUNNING → FINISHED` | `postprocess()` 判定 EOS/max_tokens | `scheduler.py:L125-L136` |
 
 <div v-click class="mt-4 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
   💡 <strong>关键</strong>：Sequence 本身不驱动状态转换——它只是状态容器。所有转换由 <code>Scheduler</code> 和 <code>BlockManager</code> 协同完成。
@@ -274,7 +278,7 @@ layout: default
 
 # Sequence 字段全景
 
-<SourceCode file="nanovllm/engine/sequence.py" lines="14-32" />
+<SourceCode file="nanovllm/engine/sequence.py" lines="15-32" />
 
 ```python
 class Sequence:
@@ -312,7 +316,7 @@ layout: default
 
 # 逐字段走读：初始化参数
 
-<SourceCode file="nanovllm/engine/sequence.py" lines="14-32" />
+<SourceCode file="nanovllm/engine/sequence.py" lines="15-32" />
 
 ```python
 def __init__(self, token_ids, sampling_params):
@@ -347,7 +351,7 @@ layout: default
 
 # 3.1 Token 字段：prompt 与 completion 分离
 
-<SourceCode file="nanovllm/engine/sequence.py" lines="14-23" />
+<SourceCode file="nanovllm/engine/sequence.py" lines="15-24" />
 
 ```python
 # 初始化时
@@ -460,7 +464,7 @@ layout: default
 
 # 3.3 block_table 与 block 分割公式
 
-<SourceCode file="nanovllm/engine/sequence.py" lines="55-65" />
+<SourceCode file="nanovllm/engine/sequence.py" lines="56-66" />
 
 ```python
 @property
@@ -496,7 +500,7 @@ def block(self, i):
 
 
 <!--
-block_table 与 block 分割公式。三个 property 在 block_table 分配、prefix cache 哈希、attention mask 构造时反复使用。打开 sequence.py L55-L65 对照阅读。
+block_table 与 block 分割公式。三个 property 在 block_table 分配、prefix cache 哈希、attention mask 构造时反复使用。打开 sequence.py L56-L66 对照阅读。
 -->
 
 ---
@@ -505,7 +509,7 @@ layout: default
 
 # 示例：用具体数值走一遍公式
 
-<SourceCode file="nanovllm/engine/sequence.py" lines="55-62" />
+<SourceCode file="nanovllm/engine/sequence.py" lines="56-63" />
 
 <div class="text-sm">
 
@@ -618,7 +622,7 @@ layout: default
 
 # last_token 字段
 
-<SourceCode file="nanovllm/engine/sequence.py" lines="22-22" />
+<SourceCode file="nanovllm/engine/sequence.py" lines="23-23" />
 
 ```python
 # 初始化时赋值（line 22）
@@ -659,7 +663,7 @@ def append_token(self, token_id: int):
 
 
 <!--
-last_token 是实例字段(非 @property)，在 __init__ L22 初始化，在 append_token L69 更新。对比 prefill 和 decode 两个阶段的数据需求差异。对照 sequence.py L22 和 L69。
+last_token 是实例字段(非 @property)，在 __init__ L23 初始化，在 append_token L70 更新。对比 prefill 和 decode 两个阶段的数据需求差异。对照 sequence.py L23 和 L70。
 -->
 
 ---
@@ -668,7 +672,7 @@ layout: default
 
 # 3.4 序列化：为 Tensor Parallel 服务
 
-<SourceCode file="nanovllm/engine/sequence.py" lines="72-83" />
+<SourceCode file="nanovllm/engine/sequence.py" lines="73-84" />
 
 ```python
 def __getstate__(self):
@@ -721,7 +725,7 @@ flowchart LR
 
 
 <!--
-__getstate__/__setstate__ 使 Sequence 可在多进程中 pickle 传输。核心优化：is_prefill=True 时序列化完整 token_ids，False 时只序列化 last_token。打开 sequence.py L72-L83。
+__getstate__/__setstate__ 使 Sequence 可在多进程中 pickle 传输。核心优化：is_prefill=True 时序列化完整 token_ids，False 时只序列化 last_token。打开 sequence.py L73-L84。
 -->
 
 ---
@@ -764,7 +768,7 @@ layout: default
 
 <div class="text-sm">
 
-`status`（WAITING/RUNNING/FINISHED）与 `is_prefill`（True/False）是两个独立标志，各自由不同条件驱动。下表展示它们在生命周期中的联动变化：
+`status`（WAITING/RUNNING/SWAPPED/FINISHED）与 `is_prefill`（True/False）是两个独立标志，各自由不同条件驱动。下表展示它们在生命周期中的联动变化：
 
 </div>
 
@@ -776,17 +780,18 @@ layout: default
 | schedule() 首次选中 | RUNNING | True | 进入 prefill 阶段 |
 | prefill 完成（num_cached == num_tokens） | RUNNING | **False** | 进入 decode 阶段 |
 | decode 中 append_token | RUNNING | False | 持续生成 |
-| **preempt 回到 waiting** | WAITING | **True** | 被抢占后重新进入 waiting，下一轮重新 prefill |
+| **preempt 走 SWAP**（cpu_offload_gb&gt;0） | **SWAPPED** | False | KV 搬到 CPU；decode 过的序列 <code>is_prefill</code> 保持 False（首次 decode 前被换出则仍为 True，swap_in 后由 decode 循环置 False） |
+| **preempt 走 RECOMPUTE**（兜底） | WAITING | **True** | KV 丢弃，重新进入 waiting，下一轮重新 prefill |
 | EOS / max_tokens | FINISHED | — | 推理结束 |
 </div>
 
 <div v-click="2" class="mt-3 p-3 bg-purple-500/10 border-l-3 border-purple-500 rounded-r text-xs">
-  <strong>联动规则</strong>：<code>is_prefill</code> 跟随 <code>num_cached_tokens &lt; num_tokens</code> 条件变化，决定 <code>__getstate__</code> 的序列化策略（完整 token_ids vs last_token）。<br/><strong>关键例外</strong>：<code>is_prefill</code> 不由 <code>status</code> 推导——preempt 将 status 回到 WAITING 时必须显式设置 <code>is_prefill = True</code>，因为新请求和抢占后请求虽同为 WAITING，调度逻辑不同。
+  <strong>联动规则</strong>：<code>is_prefill</code> 跟随 <code>num_cached_tokens &lt; num_tokens</code> 条件变化，决定 <code>__getstate__</code> 的序列化策略（完整 token_ids vs last_token）。<br/><strong>关键例外</strong>：<code>is_prefill</code> 不由 <code>status</code> 推导——preempt 走 RECOMPUTE 将 status 回到 WAITING 时必须显式设置 <code>is_prefill = True</code>，因为新请求和抢占后请求虽同为 WAITING，调度逻辑不同。SWAP 路径则两样都不动（status=SWAPPED、is_prefill 保持 False），断点续跑。
 </div>
 
 
 <!--
-status 和 is_prefill 的联动变化表。重点观察 preempt 行：status 虽回 WAITING，但 is_prefill 显式置 True——两者不由同一个条件推导。对照 scheduler.py L75-L79。
+status 和 is_prefill 的联动变化表。重点观察 preempt 的两行：RECOMPUTE 行 status 回 WAITING 且 is_prefill 显式置 True——两者不由同一个条件推导；SWAP 行 status 置 SWAPPED 而 is_prefill 保持 False（回来继续 decode，无需重发全量 token）。对照 scheduler.py L97-L123。
 -->
 
 ---
@@ -962,7 +967,7 @@ layout: default
 </div>
 
 <div v-click="3" class="mt-3 p-3 bg-purple-500/10 border-l-3 border-purple-500 rounded-r text-sm">
-  <strong>重点</strong>：decode 序列化只传 last_token 是重要的 IPC 优化。如果子进程需要完整 token_ids（如被抢占），Rank 0 会重设 <code>is_prefill=True</code>，下一轮 prefill 自然发送完整数据。
+  <strong>重点</strong>：decode 序列化只传 last_token 是重要的 IPC 优化。如果子进程被抢占且走 RECOMPUTE，Rank 0 会重设 <code>is_prefill=True</code>，下一轮 prefill 自然发送完整数据；走 SWAP 的 seq 无需重传——<code>num_cached_tokens</code> 保留，swap_in 回来继续 decode。
 </div>
 
 
@@ -993,7 +998,7 @@ for n in [1, 4, 5, 8, 9]:
 ```
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  📍 验收要点：<code>num_blocks = (num_tokens + block_size - 1) // block_size</code>；<code>last_block_num_tokens = num_tokens - (num_blocks - 1) * block_size</code>（<code>sequence.py:L55-L65</code>）
+  📍 验收要点：<code>num_blocks = (num_tokens + block_size - 1) // block_size</code>；<code>last_block_num_tokens = num_tokens - (num_blocks - 1) * block_size</code>（<code>sequence.py:L56-L66</code>）
 </div>
 
 
@@ -1018,7 +1023,7 @@ layout: default
   id="l02-q2"
   type="text"
   question="2. decode 阶段 __getstate__ 只传输 last_token，丢失了完整 token_ids。在什么场景下子进程需要完整的 prompt？"
-  answer="<strong>需要完整 prompt 的场景</strong>：<ol><li>子进程被抢占（preempt），需要重新 prefill——此时 rank0 会重设 <code>is_prefill=True</code>，下一轮序列化会发送完整 token_ids</li><li>需要做 prefix caching 哈希校验时，子进程需要完整的 token 序列计算哈希</li><li>如果 decode 过程中需要 logprobs 或 token 级别的调试信息</li></ol>实际上，<code>is_prefill</code> 标志决定了序列化策略：被抢占的 seq 返回 waiting 后会设置 <code>is_prefill=True</code>，下一轮 prefill 自然会发送完整 token_ids。"
+  answer="<strong>需要完整 prompt 的场景</strong>：<ol><li>子进程被抢占（preempt）且走 RECOMPUTE，需要重新 prefill——此时 rank0 会重设 <code>is_prefill=True</code>，下一轮序列化会发送完整 token_ids（走 SWAP 的 seq 不需要：KV 驻留 CPU，swap_in 后继续 decode）</li><li>需要做 prefix caching 哈希校验时，子进程需要完整的 token 序列计算哈希</li><li>如果 decode 过程中需要 logprobs 或 token 级别的调试信息</li></ol>实际上，<code>is_prefill</code> 标志决定了序列化策略：被抢占走 RECOMPUTE 的 seq 返回 waiting 后会设置 <code>is_prefill=True</code>，下一轮 prefill 自然会发送完整 token_ids。"
 />
 
 
@@ -1066,5 +1071,5 @@ layout: center
 </div>
 
 <!--
-结束页。总结 L02 四个核心收获：三大类字段（sequence.py L14-L32）、状态机（WAITING→RUNNING→FINISHED）、block 分割公式（L55-L65）、TP 序列化（L72-L83）。预告下一课：Scheduler 的队列与抢占机制。
+结束页。总结 L02 四个核心收获：三大类字段（sequence.py L15-L32）、状态机（WAITING→RUNNING→SWAPPED→FINISHED）、block 分割公式（L56-L66）、TP 序列化（L73-L84）。预告下一课：Scheduler 的队列与抢占机制。
 -->

@@ -68,10 +68,10 @@ layout: default
 | 阶段 | 时长 | 内容要点 |
 |------|------|----------|
 | 概念回顾 | 10 min | 从 step 中"谁决定跑哪些 seq"引出 Scheduler |
-| 代码走读 | 40 min | waiting/running 队列、prefill 拼接规则、chunked prefill、preempt |
-| 脚本演示 | 10 min | L03_scheduler.py 的 6 个 section（含真实调度器对比） |
+| 代码走读 | 40 min | waiting/running/swapped 三队列、prefill 拼接规则、chunked prefill、preempt（SWAP/RECOMPUTE） |
+| 脚本演示 | 10 min | L03_scheduler.py 的 7 个 section（含 swap 元数据往返、真实调度器对比） |
 | 动手练习 | 15 min | 整数模拟 prefill 拼接，验证 chunked prefill 限制 |
-| 答疑讨论 | 15 min | preempt 策略权衡、chunked prefill 设计讨论 |
+| 答疑讨论 | 15 min | SWAP 与 RECOMPUTE 的取舍（何时交换、何时重算）、chunked prefill 设计讨论 |
 
 
 <!--
@@ -87,7 +87,7 @@ layout: default
 
 <div v-click="1" class="flex items-start gap-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
   <span class="text-blue-400 font-bold">Q1</span>
-  <span>waiting 和 running 队列分别存放什么状态的请求？它们如何流转？</span>
+  <span>waiting、running、swapped 三个队列分别存放什么状态的请求？它们如何流转？</span>
 </div>
 
 <div v-click="2" class="flex items-start gap-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
@@ -97,7 +97,7 @@ layout: default
 
 <div v-click="3" class="flex items-start gap-3 p-3 bg-blue-500/10 border-l-3 border-blue-500 rounded-r">
   <span class="text-blue-400 font-bold">Q3</span>
-  <span>decode 阶段的 <code>preempt()</code> 在什么条件下触发？触发后请求的状态如何变化？被抢占的 seq 如何恢复？</span>
+  <span>decode 阶段的 <code>preempt()</code> 在什么条件下触发？SWAP 与 RECOMPUTE 两条出路各在什么条件下被选择？被 swap 的 seq 靠什么断点续跑？</span>
 </div>
 
 </div>
@@ -181,12 +181,12 @@ flowchart LR
 </div>
 
 <div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
-  <strong>preempt 的本质</strong>：当 decode 需要追加 block 但空闲池不足时，牺牲一个 RUNNING 序列——释放其全部 block，将其退回 WAITING。下一轮该序列走 prefill 恢复（KV cache 要重算）。
+  <strong>preempt 的本质</strong>：当 decode 需要追加 block 但空闲池不足时，牺牲一个 RUNNING 序列，且有两条出路——<strong>SWAP</strong>（<code>cpu_offload_gb&gt;0</code> 时优先）：把它的 KV block 搬到 CPU 内存、进入 swapped 队列，空出来后搬回断点续跑；<strong>RECOMPUTE</strong>（兜底）：释放 block 退回 WAITING，下一轮重新 prefill 重算 KV。
 </div>
 
 
 <!--
-用 mermaid 图展示 KV cache block 从运行前到运行中的变化。引出 preempt 的本质：空闲 block 不足时牺牲 RUNNING 序列退回 waiting。
+用 mermaid 图展示 KV cache block 从运行前到运行中的变化。引出 preempt 的本质：空闲 block 不足时牺牲 RUNNING 序列，SWAP（KV 到 CPU，断点续跑）与 RECOMPUTE（丢弃重算）双路径。
 -->
 ---
 layout: default
@@ -198,17 +198,19 @@ layout: default
 |---------|---------------|
 | 物理内存页框 | KV cache blocks |
 | 进程的页表 | `Sequence.block_table` |
-| 内存不足时换出 | `preempt()` — 释放 blocks，退回 waiting |
-| 换入恢复 | 下一轮 prefill — 重算 KV cache |
+| 内存不足时换出 | `preempt()` — SWAP：KV 搬到 CPU；RECOMPUTE 兜底：退回 waiting |
+| 换入恢复 | SWAP：swap_in 后断点续跑；RECOMPUTE：下一轮 prefill 重算 |
+| 换出目的地 | OS：磁盘 swap 分区；nano SWAP：CPU pinned 内存 |
+| 触发开关 | OS 自动；nano 由 `Config.cpu_offload_gb` 控制（>0 启用 SWAP） |
 | 换出策略（LRU/FIFO） | nano-vllm：从 running 队尾出队 |
 
 <div v-click class="mt-4 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
-  ⚠️ <strong>与 OS 的关键区别</strong>：OS 换出会把页面写入磁盘，回来时读回。但 nano-vllm 的 KV cache block 被释放后<strong>不做持久化</strong>——seq 回来时重新 prefill 重算 KV。这是计算换空间的取舍。
+  💡 <strong>类比的演进</strong>：旧版只有 RECOMPUTE 时，"类比 OS swap" 只是同构——KV 被释放后直接重算。现在 <code>cpu_offload_gb&gt;0</code> 后 SWAP 路径让类比<strong>字面成立</strong>：KV 真的被写到交换区（CPU pinned 内存），回来直接续跑，一个 token 都不用重算。默认（<code>cpu_offload_gb=0</code>）仍走重算——实现最简，且小模型上两者开销相当。
 </div>
 
 
 <!--
-用 OS Swap 类比：页框→KV block、页表→block_table、换出→preempt、换入→重算 KV。强调关键区别：nano-vllm 不做持久化，计算换空间。
+用 OS Swap 类比：页框→KV block、页表→block_table、换出→preempt（SWAP/RECOMPUTE 双路径）、换入→swap_in 续跑或重算。强调类比演进：SWAP 路径让"换出到交换区"字面成立，重算降级为兜底。
 -->
 ---
 layout: section
@@ -227,7 +229,7 @@ layout: default
 
 # 3.1 Scheduler 整体架构
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="10-17" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="10-25" />
 
 ```python
 class Scheduler:
@@ -237,18 +239,20 @@ class Scheduler:
         self.eos = config.eos
         self.block_size = config.kvcache_block_size
         self.block_manager = BlockManager(
-            config.num_kvcache_blocks, config.kvcache_block_size)
+            config.num_kvcache_blocks, config.kvcache_block_size,
+            config.num_cpu_kvcache_blocks)
         self.waiting: deque[Sequence] = deque()              # 等待队列
         self.running: deque[Sequence] = deque()              # 运行队列
+        self.swapped: deque[Sequence] = deque()              # 换出队列（KV 驻留 CPU）
 ```
 
 <div class="mt-4 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>Scheduler 架构总览</strong>：<code>Scheduler</code> 管理两个双端队列——<code>waiting</code>（待处理的新请求和被抢占的请求）和 <code>running</code>（进行中的 decode），以及一个 <code>BlockManager</code>（KV cache 分配器）。两个约束参数控制调度边界：<code>max_num_seqs</code>（最大 seq 数）和 <code>max_num_batched_tokens</code>（每轮 token 预算上限）。
+  <strong>Scheduler 架构总览</strong>：<code>Scheduler</code> 管理三个双端队列——<code>waiting</code>（待处理的新请求和被 RECOMPUTE 的请求）、<code>running</code>（进行中的 decode）、<code>swapped</code>（KV 驻留 CPU、等待迁回），以及一个 <code>BlockManager</code>（KV cache 分配器，含 CPU 块池）。两个约束参数控制调度边界：<code>max_num_seqs</code>（最大 seq 数）和 <code>max_num_batched_tokens</code>（每轮 token 预算上限）。
 </div>
 
 
 <!--
-展示 Scheduler.__init__ 的两个双端队列和约束参数。强调 waiting 存新请求和被抢占请求，running 存正在 decode 的请求。对照 scheduler.py L10-L17。
+展示 Scheduler.__init__ 的三个双端队列和约束参数。强调 waiting 存新请求和被 RECOMPUTE 请求，running 存正在 decode 的请求，swapped 存 KV 已搬到 CPU 的请求（cpu_offload_gb>0 时启用）。对照 scheduler.py L10-L25。
 -->
 ---
 layout: default
@@ -256,9 +260,9 @@ layout: default
 
 # Scheduler 初始化详解
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="8-17" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="8-25" />
 
-```python {all|2|3-4|5-6|7-8}
+```python {all|2|3-4|5-6|7-9|10-11|12}
 class Scheduler:
     def __init__(self, config: Config):
         self.max_num_seqs = config.max_num_seqs
@@ -266,9 +270,11 @@ class Scheduler:
         self.eos = config.eos
         self.block_size = config.kvcache_block_size
         self.block_manager = BlockManager(
-            config.num_kvcache_blocks, config.kvcache_block_size)
+            config.num_kvcache_blocks, config.kvcache_block_size,
+            config.num_cpu_kvcache_blocks)
         self.waiting: deque[Sequence] = deque()
         self.running: deque[Sequence] = deque()
+        self.swapped: deque[Sequence] = deque()
 ```
 
 <div class="grid grid-cols-2 gap-4 mt-4 text-sm">
@@ -277,22 +283,25 @@ class Scheduler:
   <code>max_num_seqs</code>（默认 512）：每轮最多调度多少条 seq<br/>
   <code>max_num_batched_tokens</code>（16384）：每轮 prefill 的 token 预算<br/>
   <code>kvcache_block_size</code>（256）：每个 KV block 的 token 容量<br/>
-  <code>num_kvcache_blocks</code>：由 <code>gpu_memory_utilization</code> 自动计算
+  <code>num_kvcache_blocks</code>：由 <code>gpu_memory_utilization</code> 自动计算<br/>
+  <code>num_cpu_kvcache_blocks</code>：由 <code>cpu_offload_gb</code> 换算（0 = 关闭 swap）
 </div>
 <div class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded">
   <strong>(2) 队列生命周期</strong><br/>
   <span class="text-green-400">waiting</span> → prefill 完成 → <span class="text-yellow-400">running</span>（append）<br/>
-  <span class="text-yellow-400">running</span> → preempt 触发 → <span class="text-green-400">waiting</span>（appendleft 优先恢复）
+  <span class="text-yellow-400">running</span> → preempt+RECOMPUTE → <span class="text-green-400">waiting</span>（appendleft 优先恢复）<br/>
+  <span class="text-yellow-400">running</span> → preempt+SWAP → <span class="text-purple-400">swapped</span>（KV 驻留 CPU）<br/>
+  <span class="text-purple-400">swapped</span> → swap-in（GPU 有空块）→ <span class="text-yellow-400">running</span>（断点续跑）
 </div>
 </div>
 
 <div v-click class="mt-2 text-sm opacity-80">
-  <strong>注意</strong>：构造函数不接收外部传入的 block_manager——它根据 config 的显存参数在内部创建 BlockManager。所有调度决策都源自这两个队列和四个 config 常量。
+  <strong>注意</strong>：构造函数不接收外部传入的 block_manager——它根据 config 的显存参数在内部创建 BlockManager。所有调度决策都源自这三个队列和 config 常量。
 </div>
 
 
 <!--
-逐行拆解 __init__，分两组讲解：(1) Config 四个控制参数；(2) 队列生命周期流转。强调所有决策源自两个队列和四个常量。
+逐行拆解 __init__，分两组讲解：(1) Config 控制参数（含 cpu_offload_gb 开关）；(2) 三队列生命周期流转（含 swap 的出去和回来）。强调所有决策源自三个队列和 config 常量。
 -->
 ---
 layout: default
@@ -338,22 +347,25 @@ layout: default
 flowchart LR
     DE["prefill 无产出<br/>进入 decode"] --> DE1["从 running 取 seq"]
     DE1 --> DE2{"can_append?"}
-    DE2 -- No --> DE3["preempt<br/>释放 block 退回 waiting"]
-    DE3 --> DE1
-    DE2 -- Yes --> DE4["may_append<br/>设 num_scheduled_tokens=1"]
-    DE4 --> DE5{"running 非空<br/>且 batch 有容量?"}
-    DE5 -- Yes --> DE1
-    DE5 -- No --> RetD["return scheduled<br/>is_prefill=False"]
+    DE2 -- No --> DE3{"preempt:<br/>can_swap_out?"}
+    DE3 -- Yes --> DE4["SWAP: KV 搬 CPU<br/>status=SWAPPED"]
+    DE3 -- No --> DE5["RECOMPUTE: 丢弃 KV<br/>退回 waiting 队首"]
+    DE4 --> DE1
+    DE5 --> DE1
+    DE2 -- Yes --> DE6["may_append<br/>设 num_scheduled_tokens=1"]
+    DE6 --> DE7{"running 非空<br/>且 batch 有容量?"}
+    DE7 -- Yes --> DE1
+    DE7 -- No --> RetD["return scheduled<br/>is_prefill=False"]
 ```
 
 </div>
 
 <div v-click class="mt-3 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>Decode 逐条处理</strong>：从 running 队首 FIFO 取出，can_append 失败则抢占腾空间（循环重试），成功则固定 1 token。batch 满或 running 空时 <code>return False</code>。
+  <strong>Decode 逐条处理</strong>：从 running 队首 FIFO 取出，can_append 失败则抢占腾空间（SWAP 优先、RECOMPUTE 兜底，循环重试），成功则固定 1 token。batch 满或 running 空时 <code>return False</code>。
 </div>
 
 <!--
-decode 分支控制流。重点讲 can_append/preempt 的 while 循环，以及 may_append 只在确认可调度后才分配 block。与教案 §3 的 decode 流程图保持一致。
+decode 分支控制流。重点讲 can_append/preempt 的 while 循环，以及 preempt 的双路径（SWAP：KV 搬 CPU 进 swapped；RECOMPUTE：丢弃 KV 回 waiting 队首）。may_append 只在确认可调度后才分配 block。与教案 §3 的 decode 流程图保持一致。
 -->
 ---
 layout: default
@@ -361,7 +373,7 @@ layout: default
 
 # schedule()：Prefill 判断条件
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="25-43" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="40-53" />
 
 ```python {all|5-6|9-10|14-15}
 # Prefill 循环 — 三个 break 退出条件
@@ -386,7 +398,7 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
 </div>
 
 <!--
-prefill 分支上半段：展示三个 break 条件的优先级。①② 是硬限制，③ 是设计约束。对照 scheduler.py L25-L43。
+prefill 分支上半段：展示三个 break 条件的优先级。①② 是硬限制，③ 是设计约束。对照 scheduler.py L40-L53。
 -->
 
 ---
@@ -395,7 +407,7 @@ layout: default
 
 # schedule()：Prefill 执行动作
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="44-56" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="54-65" />
 
 ```python {all|2-3|4|5-10|12-13}
 # 条件通过后，执行调度动作
@@ -424,7 +436,7 @@ prefill 分支下半段：四个执行动作。重点状态转换 WAITING→RUNN
 
 # schedule()：Decode 分支
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="57-73" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="80-94" />
 
 ```python {all|3|4-9|10-12}
     # ── Decode ──
@@ -447,7 +459,7 @@ prefill 分支下半段：四个执行动作。重点状态转换 WAITING→RUNN
 ```
 
 <div class="mt-4 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>Decode 分支三步走</strong>：从 running 队首 FIFO 取出 seq；若 block 不足则抢占队尾腾出空间；每条 seq 固定处理 1 个 token，满块时通过 <code>may_append</code> 追加新 block。
+  <strong>Decode 分支三步走</strong>：从 running 队首 FIFO 取出 seq；若 block 不足则抢占队尾腾出空间（preempt 双路径：SWAP 优先、RECOMPUTE 兜底，见 §3.4）；每条 seq 固定处理 1 个 token，满块时通过 <code>may_append</code> 追加新 block。
 </div>
 
 ---
@@ -456,7 +468,7 @@ layout: default
 
 # 3.2 Prefill 批拼接逻辑
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="29-43" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="40-53" />
 
 ```python {all|5-6|9-10|14-15}
 # Scheduler.schedule 中的 prefill 循环
@@ -482,7 +494,7 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
 
 
 <!--
-聚焦 prefill 循环核心代码（L29-L43），展示三个 break 条件对应的退出场景。强调 remaining 变量计算方式和 chunked prefill 的条件。对照 scheduler.py L29-L43。
+聚焦 prefill 循环核心代码（L40-L53），展示三个 break 条件对应的退出场景。强调 remaining 变量计算方式和 chunked prefill 的条件。对照 scheduler.py L40-L53。
 -->
 ---
 layout: default
@@ -539,7 +551,7 @@ layout: default
 
 当一条 seq 的待处理 token 超过本轮剩余预算时，只允许 batch 的第一条做切分：
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="42-43" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="52-53" />
 
 ```python
 if remaining < num_tokens and scheduled_seqs:
@@ -569,7 +581,7 @@ if remaining < num_tokens and scheduled_seqs:
 
 
 <!--
-用允许和不允许两个场景对比讲解 chunked prefill 规则。强调判断条件 remaining < num_tokens and scheduled_seqs。讲解设计意图。对照 scheduler.py L42-L43。
+用允许和不允许两个场景对比讲解 chunked prefill 规则。强调判断条件 remaining < num_tokens and scheduled_seqs。讲解设计意图。对照 scheduler.py L52-L53。
 -->
 ---
 layout: default
@@ -655,7 +667,7 @@ layout: default
 
 # 3.3 Decode 分支
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="57-73" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="80-94" />
 
 ```python {all|3|4-9|10-14}
 # decode 循环：从 running 逐条取出
@@ -682,9 +694,13 @@ while self.running and len(scheduled_seqs) < self.max_num_seqs:
   🔑 <strong>may_append</strong>：检查 <code>len(seq) % block_size == 1</code> 时，说明上一个 block 刚好写满，需要分配新 block 来存即将生成的 token 的 KV。
 </div>
 
+<div v-click class="mt-2 p-3 bg-purple-500/10 border-l-3 border-purple-500 rounded-r text-sm">
+  🔑 <strong>前置的 swap-in 阶段</strong>（<code>scheduler.py:L67-L77</code>）：进入 decode 循环之前，若 <code>swapped</code> 队列非空且 GPU 空块够，先把队首 seq 迁回 <code>running</code>——KV 从 CPU 拷回后断点续跑，无需重算。这一步也是活性保障：所有 running 都被换出时，靠它 refill。
+</div>
+
 
 <!--
-讲解 decode 循环（L57-L70）：FIFO 从 running 队首取出，先检查 can_append，失败则 preempt 队尾。每条 seq 固定调度 1 token。对照 scheduler.py L57-L73。
+讲解 decode 循环（L80-L92）：FIFO 从 running 队首取出，先检查 can_append，失败则 preempt 队尾（SWAP/RECOMPUTE 双路径）。每条 seq 固定调度 1 token。补充 decode step 开头的 swap-in 阶段。对照 scheduler.py L80-L94。
 -->
 ---
 layout: default
@@ -692,7 +708,7 @@ layout: default
 
 # Decode: can_append 与 may_append 的协作
 
-<SourceCode file="nanovllm/engine/block_manager.py" lines="103-108" />
+<SourceCode file="nanovllm/engine/block_manager.py" lines="107-112" />
 
 ```python {all|1-2|3-5}
 def can_append(self, seq: Sequence) -> bool:
@@ -724,50 +740,58 @@ def may_append(self, seq: Sequence):
 
 
 <!--
-聚焦 block_manager.py 中「检查与执行分离」模式：can_append 仅检查不修改状态，may_append 确认可调度后分配。对照 block_manager.py L103-L108。
+聚焦 block_manager.py 中「检查与执行分离」模式：can_append 仅检查不修改状态，may_append 确认可调度后分配。对照 block_manager.py L107-L112。
 -->
 ---
 layout: default
 ---
 
-# 3.4 Preempt：从队尾牺牲
+# 3.4 Preempt：SWAP 优先，RECOMPUTE 兜底
 
-<SourceCode file="nanovllm/engine/scheduler.py" lines="75-79" />
+<SourceCode file="nanovllm/engine/scheduler.py" lines="97-116" />
 
 ```python
 def preempt(self, seq: Sequence):
-    seq.status = SequenceStatus.WAITING          # ① 状态重置为 WAITING
-    seq.is_prefill = True                        # ② 标记需要重新 prefill
-    self.block_manager.deallocate(seq)           # ③ 释放所有 KV blocks
-    self.waiting.appendleft(seq)                 # ④ 插回 waiting 队首（优先恢复）
+    # 护栏：本 step 刚 swap_in 的 seq，GPU 块中 KV 尚未拷回（是垃圾数据）
+    if not set(self.blocks_to_swap_in.values()).isdisjoint(seq.block_table):
+        self.blocks_to_swap_in = {c: g for c, g in self.blocks_to_swap_in.items()
+                                  if g not in set(seq.block_table)}
+        self._recompute(seq)                          # 取消其 swap-in，改走重算
+        return
+    if self.block_manager.can_swap_out(seq):          # CPU 空块够 且 所有块 ref_count==1
+        mapping = self.block_manager.swap_out(seq)    # {gpu_id: cpu_id}
+        seq.status = SequenceStatus.SWAPPED           # KV 即将搬到 CPU
+        self.swapped.append(seq)                      # 入 swapped 队列，等空位续跑
+    else:
+        self._recompute(seq)                          # 兜底：CPU 满 / 含共享块
 ```
 
 <div class="mt-4 p-3 bg-green-500/10 border-l-3 border-green-500 rounded-r text-sm">
-  <strong>Preempt 四步走</strong>：① 状态重置为 <code>WAITING</code>；② 标记需要重新 prefill（<code>is_prefill=True</code>）；③ 释放所有 KV cache blocks；④ 通过 <code>appendleft</code> 插队到 waiting 头部获得优先恢复权。
+  <strong>Preempt 双路径</strong>：先过护栏——本 step 刚 swap_in 的 seq 其 GPU 块里还是垃圾 KV，绝不能再 swap_out（会把垃圾拷去 CPU 覆盖真身），直接 <code>_recompute</code>。主决策看 <code>can_swap_out</code>：CPU 有空位<strong>且</strong>所有块独占（<code>ref_count==1</code>，共享块不能搬走）才 SWAP；否则 <code>_recompute</code>——旧版 preempt 的四步（WAITING + is_prefill=True + deallocate + appendleft）原样住在里面。
 </div>
 
 <div class="mt-4 grid grid-cols-3 gap-3 text-sm">
 <div v-click="1" class="bg-blue-500/10 border-l-3 border-blue-500 p-3 rounded text-center">
-  <div class="font-bold mb-1">① 状态重置</div>
-  <div class="opacity-70">WAITING + is_prefill=True</div>
+  <div class="font-bold mb-1">① 护栏校验</div>
+  <div class="opacity-70">刚 swap_in 的 seq → 强制 RECOMPUTE</div>
 </div>
-<div v-click="2" class="bg-green-500/10 border-l-3 border-green-500 p-3 rounded text-center">
-  <div class="font-bold mb-1">② 资源回收</div>
-  <div class="opacity-70">deallocate 释放所有 blocks</div>
+<div v-click="2" class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded text-center">
+  <div class="font-bold mb-1">② SWAP 优先</div>
+  <div class="opacity-70">swap_out → SWAPPED → swapped 队列</div>
 </div>
-<div v-click="3" class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded text-center">
-  <div class="font-bold mb-1">③ 优先恢复</div>
-  <div class="opacity-70">appendleft 插队到 waiting 头部</div>
+<div v-click="3" class="bg-red-500/10 border-l-3 border-red-500 p-3 rounded text-center">
+  <div class="font-bold mb-1">③ RECOMPUTE 兜底</div>
+  <div class="opacity-70">丢弃 KV → waiting 队首，重新 prefill</div>
 </div>
 </div>
 
 <div v-click="4" class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
-  <strong>为什么抢队尾？</strong>FIFO 队列中，队尾是最后入队的 seq，通常已生成的 token 最少。抢占它意味着恢复时的重计算代价最小。被抢占的 seq 通过 <code>waiting.appendleft</code> 获得"优先恢复权"。
+  <strong>为什么抢队尾？</strong>FIFO 队列中，队尾是最后入队的 seq，通常已生成的 token 最少。抢占它意味着恢复代价最小——RECOMPUTE 路径重算量小，SWAP 路径搬运的 KV 也少。被 RECOMPUTE 的 seq 通过 <code>waiting.appendleft</code> 获得"优先恢复权"。
 </div>
 
 
 <!--
-讲解 preempt 核心逻辑：状态重置→资源回收→优先恢复。解释抢队尾的原因——队尾 seq token 最少，恢复代价最小。对照 scheduler.py L75-L79。
+讲解 preempt 双路径：护栏（本 step 刚 swap_in 的 seq 不能再 swap_out，GPU 块里 KV 还没拷回）→ SWAP 优先（can_swap_out 要求 CPU 空位 + 全部块独占）→ RECOMPUTE 兜底（_recompute 即旧版四步 + 计数器）。解释抢队尾的原因——队尾 seq token 最少，两条路径的代价都最小。对照 scheduler.py L97-L123。
 -->
 ---
 layout: default
@@ -775,28 +799,27 @@ layout: default
 
 # Preempt 的恢复流程
 
-被抢占的 seq 回到 waiting 后，下一轮 schedule 会发生什么：
+被抢占的 seq 有两条恢复路径，取决于它被抢占时走了哪条出路：
 
 <div class="flex justify-center">
 
-```mermaid {scale: 0.5}
+```mermaid {scale: 0.55}
 flowchart TD
-    A["seq 在 waiting 头部<br/>is_prefill=True<br/>block_table 已清空"] --> B["schedule() prefill 分支"]
-    B --> C["can_allocate(seq)<br/>= 0（无缓存命中）"]
-    C --> D["num_tokens = 总长度<br/>= prompt + 已生成 token"]
-    D --> E["分配新 blocks<br/>从头重算所有 KV"]
-    E --> F["prefill 完成后<br/>进入 running 继续 decode"]
+    S["swapped 队列中的 seq<br/>KV 驻留 CPU · num_cached_tokens 保留"] -->|"decode step 开头<br/>GPU 有空块"| SI["swap_in：<br/>分新 GPU 块 + 拷回 KV<br/>重建 block_table"]
+    SI --> SI2["以 decode 身份续跑<br/>一个 token 都不用重算"]
+    W["waiting 队首的 seq<br/>is_prefill=True · KV 已丢弃"] -->|"下一轮 prefill<br/>（RECOMPUTE）"| RC["can_allocate = 0<br/>分配新 blocks"]
+    RC --> RC2["从头重算所有 KV<br/>prefill 完成后继续 decode"]
 ```
 
 </div>
 
 <div v-click class="mt-3 p-3 bg-yellow-500/10 border-l-3 border-yellow-500 rounded-r text-sm">
-  ⚠️ <strong>代价</strong>：之前生成的 token 的 KV cache 全部丢失，需要重新计算。这是"计算换空间"的代价——如果显存足够大，就不会触发 preempt。
+  ⚠️ <strong>RECOMPUTE 的代价</strong>：之前生成的 token 的 KV cache 全部丢失，需要重新计算——这是"计算换空间"。SWAP 路径没有这笔重算账，代价是 KV 经 PCIe 搬一个来回；<code>cpu_offload_gb=0</code>（默认）时重算是唯一出路。
 </div>
 
 
 <!--
-用 mermaid 图展示被抢占 seq 从 waiting 头部重新 prefill 的全过程。强调代价：之前 KV cache 全部丢失需要重算。
+用 mermaid 图展示被抢占 seq 的两条恢复路径：SWAP 路径（swap-in 阶段迁回，断点续跑零重算）与 RECOMPUTE 路径（waiting 队首重新 prefill，全量重算）。强调两条路径各自的代价。
 -->
 ---
 layout: default
@@ -807,27 +830,27 @@ layout: default
 | 对比维度 | OS Swap Out | nano-vllm Preempt |
 |---------|------------|-------------------|
 | 被驱逐资源 | 物理内存页面 | KV cache blocks |
-| 持久化 | 写入磁盘 swap 分区 | 不持久化——直接释放 |
-| 恢复路径 | 缺页中断 → 从磁盘读回 | 重新 prefill → 重算 KV |
-| 恢复成本主导 | 磁盘 I/O（毫秒级随机读） | GPU 计算（微秒级/token 前向） |
+| 换出目的地 | 磁盘 swap 分区 | SWAP：CPU pinned 内存；RECOMPUTE：不换出，直接释放 |
+| 恢复路径 | 缺页中断 → 从磁盘读回 | SWAP：swap_in → 断点续跑；RECOMPUTE：重新 prefill 重算 |
+| 恢复成本主导 | 磁盘 I/O（毫秒级随机读） | SWAP：PCIe 传输；RECOMPUTE：GPU 重算前向 |
+| 触发开关 | 内存不足时内核自动 | `Config.cpu_offload_gb`（>0 启用 SWAP，默认 0 仅 RECOMPUTE） |
 | 驱逐策略 | LRU/Clock 等内核算法 | 固定：队尾出队（FIFO） |
-| 被驱逐者感知 | 透明——进程无感知 | 非透明——seq 变回 WAITING |
 | 资源粒度 | 4 KB 页框 | 256 token / block |
 
 <div class="mt-4 grid grid-cols-2 gap-4 text-xs">
 <div class="bg-blue-500/10 border-l-3 border-blue-500 p-3 rounded">
-  <strong>为什么 nano-vllm 不做持久化？</strong><br/>
-  GPU 显存带宽 >> 磁盘带宽。KV cache 重算开销（GPU 前向传播）小于从磁盘读回——尽管完整重算几百 token 比读页慢，但省去了数据传输路径和磁盘寿命开销。这是"计算换存储"。
+  <strong>为什么默认仍是重算？</strong><br/>
+  交换与重算是一对成本权衡：SWAP 付 PCIe 传输（∝ KV 字节数 ÷ 带宽），RECOMPUTE 付重算前向（∝ 模型规模 × prompt 长度）。RTX 3090 + Qwen3-0.6B 实测两者吞吐持平（设计文档 §10.E）；模型越大、prompt 越长，重算越贵，SWAP 越划算——这也是 vLLM 在大模型场景默认 swap 的原因。
 </div>
 <div class="bg-purple-500/10 border-l-3 border-purple-500 p-3 rounded">
   <strong>队尾抢占的合理性</strong><br/>
-  队尾 seq 生成的 token 最少，释放的 block 虽少但恢复代价最小（重算量小）。与 OS 的 LRU 对比：LRU 换出"最久未访问"的页；nano-vllm 队尾 ≈ 最"新"的请求，关联的 KV 状态最少。
+  队尾 seq 生成的 token 最少，恢复代价最小——RECOMPUTE 路径重算量小，SWAP 路径搬运的 KV 也少。与 OS 的 LRU 对比：LRU 换出"最久未访问"的页；nano-vllm 队尾 ≈ 最"新"的请求，关联的 KV 状态最少。
 </div>
 </div>
 
 
 <!--
-用对比表格总结 preempt 和 OS Swap 的七个差异维度。延伸讲解不做持久化的原因（GPU 计算比磁盘 I/O 更快）和队尾抢占的合理性。
+用对比表格总结 preempt 和 OS Swap 的差异维度（含换出目的地与触发开关）。延伸讲解：SWAP 与 RECOMPUTE 是传输 vs 重算的成本权衡，0.6B 实测持平、大模型 SWAP 占优（设计文档 §10.E）；队尾抢占的合理性。
 -->
 ---
 layout: section
@@ -844,34 +867,23 @@ layout: section
 layout: default
 ---
 
-# L03_scheduler.py：6 个验证 section
+# L03_scheduler.py：7 个验证 section
 
-<SourceCode file="docs/llm-inference-visual/scripts/L03_scheduler.py" lines="1-13" />
+<SourceCode file="docs/llm-inference-visual/scripts/L03_scheduler.py" lines="1-15" />
 
-```python
-"""
-L03 练习：Scheduler 的队列、chunked prefill 与 preempt
-
-验证要点：
-- prefill batch 拼接规则与 chunked prefill 限制
-- prefix cache 对 batch 拼接的影响
-- decode 调度与 preempt 机制
-- 真实 Scheduler 类对比验证
-"""
-```
-
-<div class="mt-4 grid grid-cols-3 gap-2 text-xs text-center">
+<div class="mt-4 grid grid-cols-4 gap-2 text-xs text-center">
 <div class="bg-blue-500/10 p-2 rounded">§1<br/><strong>基本 Prefill 拼接</strong></div>
 <div class="bg-green-500/10 p-2 rounded">§2<br/><strong>Chunked 约束</strong></div>
 <div class="bg-purple-500/10 p-2 rounded">§3<br/><strong>Prefix cache 批处理</strong></div>
 <div class="bg-yellow-500/10 p-2 rounded">§4<br/><strong>Decode + Preempt</strong></div>
-<div class="bg-red-500/10 p-2 rounded">§5<br/><strong>Preempt 状态机</strong></div>
-<div class="bg-gray-500/10 p-2 rounded">§6<br/><strong>真实调度器对比</strong></div>
+<div class="bg-red-500/10 p-2 rounded">§5<br/><strong>Preempt 双路径</strong></div>
+<div class="bg-orange-500/10 p-2 rounded">§6<br/><strong>swap 元数据往返</strong></div>
+<div class="bg-gray-500/10 p-2 rounded">§7<br/><strong>真实调度器对比<br/>+ SWAP 全流程</strong></div>
 </div>
 
 
 <!--
-概览六个验证 section：Prefill 拼接、Chunked 约束、Prefix cache、Decode+Preempt、Preempt 状态机、真实调度器对比。对照 L03_scheduler.py L1-L13。
+概览七个验证 section：Prefill 拼接、Chunked 约束、Prefix cache、Decode+Preempt、Preempt 双路径状态机、BlockManager swap 元数据往返（纯 CPU）、真实调度器对比。对照 L03_scheduler.py L1-L15。
 -->
 ---
 layout: default
@@ -881,16 +893,16 @@ layout: default
 
 ```python
 # §1: 基本 prefill — 三条短 seq 轻松放入
-simulate_prefill([100, 200, 300], max_batched=16384)
+simulate_prefill([100, 200, 300], max_batched_tokens=16384)
 # → [(0, 100), (1, 200), (2, 300)]  全部整条塞入
 
 # §1: 单条长 seq 被切分 (chunked prefill)
-simulate_prefill([2000], max_batched=1200)
+simulate_prefill([2000], max_batched_tokens=1200)
 # → 第1轮: [(0, 1200)]  ← 被切分，只处理1200
 #    第2轮: [(0, 800)]   ← 剩余800继续
 
 # §2: chunked prefill 只对第一条有效
-simulate_prefill([300, 800, 200], max_batched=1000)
+simulate_prefill([300, 800, 200], max_batched_tokens=1000)
 # → [(0, 300)]  ← seq[0] 300, 剩余 700 < 800
 #   seq[1] 被跳过 (chunked 限制)
 #   断言: scheduled == [(0, 300)]
@@ -909,7 +921,7 @@ layout: default
 
 ```python
 # §3: prefix cache 命中减少 token 消耗
-simulate_prefill([1000, 800], max_batched=1200,
+simulate_prefill([1000, 800], max_batched_tokens=1200,
                  num_cached_tokens=[512, 0])
 # → seq[0] 只需 1000-512=488 token
 #   seq[1] 需要 800, 488+800 > 1200 → break
@@ -928,7 +940,7 @@ simulate_prefill([1000, 800], max_batched=1200,
 layout: default
 ---
 
-# §4-6：Decode 调度 + 真实调度器对比
+# §4-7：Decode 调度 + swap 往返 + 真实调度器对比
 
 ```python
 # §4: decode 调度模拟 (block_size=4)
@@ -941,18 +953,29 @@ layout: default
 # D: free=0, 只有自己, len%4==1 → 自身被抢占
 #    断言: scheduled=0, preempted=[0]
 
-# §5: preempt 状态转换
-# WAITING → is_prefill=True → deallocate → waiting.appendleft
+# §5: preempt 双路径
+# ① 护栏: 本 step 刚 swap_in → 强制 RECOMPUTE
+# ② can_swap_out? (CPU 空位 + 全部块 ref_count==1)
+#    Yes → SWAP；No → _recompute（旧版四步 + 计数器）
 
-# §6: 真实 Scheduler 类对比
+# §6: BlockManager swap 元数据往返（纯 CPU，无需 GPU）
+# swap_out: {gpu_id: cpu_id}，GPU 块归还，num_cached_tokens 保留
+# swap_in : 重建 block_table，CPU 块释放
+# 断言: 往返后块数不变；can_swap_out 两条否决（CPU 满 / 共享块）
+
+# §7: 真实 Scheduler 类对比
 # 初始化真实 Scheduler, 创建 3条 seq, schedule()
 # 断言: len(scheduled) == 3  (模拟 == 真实)
 # postprocess() → schedule() → 断言: num_scheduled_tokens == 1
+# 场景 E: 强制抢占的 SWAP 全流程（num_kvcache_blocks=2, CPU 块=8, eos=0）
+#   prefill 占满 GPU → decode 抢占队尾 → blocks_to_swap_out, status=SWAPPED
+#   等 A 完成释放 block → swap_in 迁回（num_cached_tokens=256 原样）
+# 场景 E2 对照: CPU 块=0 → RECOMPUTE（num_cached_tokens 归零）
 ```
 
 
 <!--
-简要过 §4-6 的测试要点：A/B/C/D 四种 decode 场景、状态转换链、真实调度器对比。建议运行脚本验证输出一致性。
+简要过 §4-7 的测试要点：A/B/C/D 四种 decode 场景、preempt 双路径状态机、BlockManager swap 元数据往返（swap_out/swap_in 保 num_cached_tokens）、真实调度器对比——§7 末尾的场景 E/E2 在真实引擎里跑完整的 SWAP 全流程（抢占搬出 → 等空块 → 迁回断点续跑）并给出 RECOMPUTE 对照。建议运行脚本验证输出一致性。
 -->
 ---
 layout: default
@@ -1029,9 +1052,16 @@ layout: default
   answer="<strong>max_num_batched_tokens 主要约束 prefill</strong>：prefill 阶段每条 seq 可能处理几十到几千 token，用 token 总预算控计算量比控数量更合理。如果只控 seq 数，一条 8192 token 的长 prompt 和一条 8 token 的短 prompt 计算量差三个数量级。<br><strong>max_num_seqs 主要约束 decode</strong>：decode 阶段每条 seq 只处理 1 个 token，计算量很均匀，直接控 seq 数量就够了。同时也限定了 prefill batch 的 seq 数上限——虽然 prefill 主要受 token 预算约束，但 seq 数也不能无限多（每个 seq 的 CUDA Graph 需要预留 buffer）。"
 />
 
+<SelfTest
+  id="l03-q4"
+  type="text"
+  question="4. preempt 时 seq 什么情况下走 SWAP、什么情况下走 RECOMPUTE？SWAP 为什么要求所有块 ref_count == 1？两条路径的成本结构有何不同？"
+  answer="<strong>走 SWAP 的条件</strong>（<code>can_swap_out</code>）：CPU 空块足够，且该 seq 的所有块 ref_count == 1（全部独占）——含共享前缀块的 seq 整体退回 RECOMPUTE，因为共享块可能还被其他 seq 在 GPU 上读取，搬走会破坏一致性。<strong>成本结构</strong>：RECOMPUTE 付重算前向（∝ 模型规模 × prompt 长度），SWAP 付 PCIe 传输（∝ KV 字节数 ÷ 带宽）。0.6B 小模型实测两者持平；模型越大、prompt 越长，SWAP 越占优——vLLM 在大模型场景默认 swap。另注意护栏：本 step 刚 swap_in 的 seq 不能立即 swap_out（GPU 块里 KV 还没拷回），只能 RECOMPUTE。"
+/>
+
 
 <!--
-第三道自测题：max_num_seqs 和 max_num_batched_tokens 分别主要约束哪个阶段。答案：前者约束 decode（计算均匀），后者约束 prefill（计算量差异大）。
+第四道自测题：SWAP/RECOMPUTE 的选择条件、ref_count==1 的原因（共享块一致性）、两条路径的成本权衡与护栏。建议作为课后思考题。
 -->
 ---
 layout: center
@@ -1040,14 +1070,14 @@ layout: center
 # 🎉 第 3 课完成
 
 <div class="mt-6 text-lg opacity-80">
-  掌握了 Scheduler 的队列管理、Chunked Prefill、Preempt 机制
+  掌握了 Scheduler 的三队列管理、Chunked Prefill、Preempt（SWAP/RECOMPUTE）机制
 </div>
 
 <div class="mt-4 grid grid-cols-4 gap-3 text-sm max-w-2xl mx-auto">
   <div class="bg-blue-500/10 p-3 rounded">✅ Prefill 拼接规则</div>
   <div class="bg-green-500/10 p-3 rounded">✅ Chunked Prefill</div>
   <div class="bg-purple-500/10 p-3 rounded">✅ Decode 调度</div>
-  <div class="bg-yellow-500/10 p-3 rounded">✅ Preempt 策略</div>
+  <div class="bg-yellow-500/10 p-3 rounded">✅ Preempt：SWAP/RECOMPUTE</div>
 </div>
 
 <div class="mt-10">
@@ -1056,5 +1086,5 @@ layout: center
 
 
 <!--
-结束页，总结四个知识点：Prefill 拼接规则、Chunked Prefill、Decode 调度、Preempt 策略。提醒预习下一课 BlockManager 与 Prefix Caching。留 5 分钟答疑。
+结束页，总结四个知识点：Prefill 拼接规则、Chunked Prefill、Decode 调度、Preempt 双路径（SWAP/RECOMPUTE）。提醒预习下一课 BlockManager 与 Prefix Caching。留 5 分钟答疑。
 -->

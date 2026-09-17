@@ -35,6 +35,8 @@ LLM 推理的性能瓶颈可以分为两大类：**计算瓶颈**（GPU 算力�
 
 这三种优化不互斥，它们住在代码的不同位置。接下来的地图告诉我们每个开关在哪个文件。
 
+值得一提的是，本课的地图聚焦**吞吐与延迟**维度。显存**容量**维度另有一类手段——第 3 课介绍的 KV Cache CPU Offloading（swap 抢占，`cpu_offload_gb > 0`）：它不加速计算，而是把被抢占请求的 KV 搬到 CPU 内存，用传输换容量，让同样的显存装下更多并发上下文。
+
 ---
 
 ## 3. 三种优化的位置地图
@@ -47,15 +49,15 @@ LLM 推理的性能瓶颈可以分为两大类：**计算瓶颈**（GPU 算力�
 
 TP 的最小机制：rank0 通过 spawn 创建子进程，并以共享内存作为 IPC（进程间通信）通道广播方法调用。这与操作系统的 fork/spawn + 共享内存多进程模型同构：主进程（rank0）将任务描述写入共享内存段，子进程通过 Event 信号量唤醒后读取，并在各自的 GPU 上执行相同的方法以完成张量并行计算。
 
-- **进程创建与事件**：[`LLMEngine.__init__`](../../nanovllm/engine/llm_engine.py#L22-L34) 使用 `spawn` 启动 `tensor_parallel_size - 1` 个子进程，并为每个子进程创建一个 Event（事件信号）。rank0 仍在主进程内创建一个 `ModelRunner`。
-- **共享内存与方法调用广播**：[`ModelRunner.__init__`](../../nanovllm/engine/model_runner.py#L41-L48) 中当 `world_size > 1` 且 `rank == 0` 时创建共享内存；`rank > 0` 通过 [`loop()`](../../nanovllm/engine/model_runner.py#L61-L66) 阻塞等待 Event 被 set，然后从共享内存反序列化出 `method_name, args` 并执行同名方法。rank0 通过 [`write_shm` 与 `call`](../../nanovllm/engine/model_runner.py#L76-L89) 广播调用。
+- **进程创建与事件**：[`LLMEngine.__init__`](../../nanovllm/engine/llm_engine.py#L22-L35) 使用 `spawn` 启动 `tensor_parallel_size - 1` 个子进程，并为每个子进程创建一个 Event（事件信号）。rank0 仍在主进程内创建一个 `ModelRunner`。
+- **共享内存与方法调用广播**：[`ModelRunner.__init__`](../../nanovllm/engine/model_runner.py#L42-L49) 中当 `world_size > 1` 且 `rank == 0` 时创建共享内存；`rank > 0` 通过 [`loop()`](../../nanovllm/engine/model_runner.py#L62-L67) 阻塞等待 Event 被 set，然后从共享内存反序列化出 `method_name, args` 并执行同名方法。rank0 通过 [`write_shm` 与 `call`](../../nanovllm/engine/model_runner.py#L77-L90) 广播调用。
 
 ### 3.2 CUDA Graph：capture 与 replay 的触发条件
 
 关注点只有"何时用图重放"，不涉及图内部捕获了哪些算子。nano-vllm 的图重放只在 decode 的一部分场景生效，依赖 context 中的若干张量被写入到预先分配的 graph_vars 缓冲里。
 
-- **何时 capture（录制）**：若 `enforce_eager` 为 `False`，[`ModelRunner.__init__`](../../nanovllm/engine/model_runner.py#L34-L38) 会在 warmup 与 KV cache 分配后调用 [`capture_cudagraph()`](../../nanovllm/engine/model_runner.py#L222-L257)，提前为不同 batch size 捕获图。简单来说：把一次完整的 decode 前向传播"录像"下来，之后直接"回放"就不需要 Python 解释器逐行执行了。
-- **何时 replay（重放）**：[`run_model`](../../nanovllm/engine/model_runner.py#L195-L212) 在满足以下任一条件时会走普通 eager 路径（逐步执行）：prefill、`enforce_eager` 为 `True`、或 `input_ids.size(0) > 512`。否则才会根据 batch size 选择一个已捕获的图，并把当步的 `slot_mapping/context_lens/block_tables` 写入缓冲后 `graph.replay()`。
+- **何时 capture（录制）**：若 `enforce_eager` 为 `False`，[`ModelRunner.__init__`](../../nanovllm/engine/model_runner.py#L35-L38) 会在 warmup 与 KV cache 分配后调用 [`capture_cudagraph()`](../../nanovllm/engine/model_runner.py#L239-L274)，提前为不同 batch size 捕获图。简单来说：把一次完整的 decode 前向传播"录像"下来，之后直接"回放"就不需要 Python 解释器逐行执行了。
+- **何时 replay（重放）**：[`run_model`](../../nanovllm/engine/model_runner.py#L212-L229) 在满足以下任一条件时会走普通 eager 路径（逐步执行）：prefill、`enforce_eager` 为 `True`、或 `input_ids.size(0) > 512`。否则才会根据 batch size 选择一个已捕获的图，并把当步的 `slot_mapping/context_lens/block_tables` 写入缓冲后 `graph.replay()`。swap 拷贝发生在 step 之间、图捕获之外，与 replay 无冲突：被换回的 seq 以 decode 身份进 batch，照常走图路径。
 
 ```python
 # run_model：prefill / enforce_eager / batch 过大 → eager；其余 → 填 graph_vars 再 replay。
@@ -116,10 +118,11 @@ print(will_replay(is_prefill=True, enforce_eager=False, batch_size=128))
 print(will_replay(is_prefill=False, enforce_eager=False, batch_size=128))
 ```
 
-- 验收要点（依据代码）：`if is_prefill or self.enforce_eager or input_ids.size(0) > 512: eager else: replay`（见 [model_runner.py:L195-L203](../../nanovllm/engine/model_runner.py#L195-L203)）
+- 验收要点（依据代码）：`if is_prefill or self.enforce_eager or input_ids.size(0) > 512: eager else: replay`（见 [model_runner.py:L214](../../nanovllm/engine/model_runner.py#L214)）
 
 ### 4.2 课后自测题
 
 1. CUDA Graph replay 的阈值是 `bs > 512`。这个限制是出于什么考虑？如果改成 1024，每次 replay 前需要做什么额外操作？
 2. TP 用 `spawn` + 共享内存而不是 `fork`。Python 的 fork 和 spawn 在 CUDA 上下文继承上有根本差异 —— 如果改用 fork，nano-vllm 的初始化流程会怎么简化？为什么真实 vLLM 也用 spawn？
 3. `torch.compile` 只用在 `Sampler.forward`。如果给整个 Transformer 前向加上 compile，会遇到什么问题（提示：动态 shape、重编译开销、与 CUDA Graph 的互操作）？
+4. swap 拷贝与 CUDA Graph replay 会不会冲突？从 `run_model` 的触发条件与 swap 发生的时机（step 之间、图外）推演：被 swap_in 迁回的 seq 在下一轮 decode 中走哪条路径？

@@ -109,23 +109,27 @@ flowchart TD
 
 ### 3.2 generate：把 prompts 放入调度器并循环 step
 
-[`LLMEngine.generate`](../../nanovllm/engine/llm_engine.py#L60-L90) 把每个 prompt 变成 `Sequence` 加入调度器，然后循环调用 `step()`，直到 `scheduler.is_finished()` 返回 True，最后把 token_ids decode 成文本。其中“入队”这一步由 [`add_request`](../../nanovllm/engine/llm_engine.py#L43-L47) 专门负责，它会 tokenize 字符串 prompt 并构造 `Sequence` 后调用 `Scheduler.add`。
+[`LLMEngine.generate`](../../nanovllm/engine/llm_engine.py#L68-L98) 把每个 prompt 变成 `Sequence` 加入调度器，然后循环调用 `step()`，直到 `scheduler.is_finished()` 返回 True，最后把 token_ids decode 成文本。其中“入队”这一步由 [`add_request`](../../nanovllm/engine/llm_engine.py#L46-L50) 专门负责，它会 tokenize 字符串 prompt 并构造 `Sequence` 后调用 `Scheduler.add`。
 
 - 数据形态：
   - 输入：`prompts: list[str] | list[list[int]]` 与 `sampling_params`
   - 中间：`Sequence`（请求状态容器）经由 `add_request` 加入 `Scheduler.waiting`
   - 输出：`list[{"text": str, "token_ids": list[int]}]`
-- prefill / decode 同循环辨识：`step` 返回的 `num_tokens` 大于 0 表示本轮走的是 prefill（等于本轮所有 seq 的 `num_scheduled_tokens` 之和）；等于 `-len(seqs)` 表示 decode（每个 seq 只前进一格）。这也是终端进度条上 `Prefill tok/s` 与 `Decode tok/s` 能够分开统计吞吐的原因（见 [llm_engine.py:L51](../../nanovllm/engine/llm_engine.py#L51) 与 [llm_engine.py:L76-L79](../../nanovllm/engine/llm_engine.py#L76-L79)）。
+- prefill / decode 同循环辨识：`step` 返回的 `num_tokens` 大于 0 表示本轮走的是 prefill（等于本轮所有 seq 的 `num_scheduled_tokens` 之和）；等于 `-len(seqs)` 表示 decode（每个 seq 只前进一格）。这也是终端进度条上 `Prefill tok/s` 与 `Decode tok/s` 能够分开统计吞吐的原因（见 [llm_engine.py:L54](../../nanovllm/engine/llm_engine.py#L54) 与 [llm_engine.py:L84-L91](../../nanovllm/engine/llm_engine.py#L84-L91)）。
 
 ### 3.3 step：调度 → 执行 → 回写
 
-[`LLMEngine.step`](../../nanovllm/engine/llm_engine.py#L49-L55) 是理解推理引擎的最佳切入点。**每次 step 只在 prefill 和 decode 中选一种执行**，这与第 2.3 节的“读题目”与“写答案”两个阶段一一对应：两种模式不混合执行，但共用同一个三段式调用（调度 → 执行 → 回写）。
+[`LLMEngine.step`](../../nanovllm/engine/llm_engine.py#L52-L63) 是理解推理引擎的最佳切入点。**每次 step 只在 prefill 和 decode 中选一种执行**，这与第 2.3 节的“读题目”与“写答案”两个阶段一一对应：两种模式不混合执行，但共用同一个三段式调用（调度 → 执行 → 回写）——开启 CPU 卸载时，调度与执行之间还会插入一步 KV 拷贝（swap），默认关闭时不存在。
 
 ```python
-# LLMEngine.step：一次调度 → 一次执行 → 一次回写；仅用 num_tokens 的正负区分 prefill / decode。
+# LLMEngine.step：一次调度 → （可选的 swap 拷贝）→ 一次执行 → 一次回写；仅用 num_tokens 的正负区分 prefill / decode。
 def step(self):
     seqs, is_prefill = self.scheduler.schedule()
     num_tokens = sum(seq.num_scheduled_tokens for seq in seqs) if is_prefill else -len(seqs)
+    if self.scheduler.blocks_to_swap_out:                     # GPU→CPU 拷贝（抢占触发，swap 开启时才有）
+        self.model_runner.call("swap_out", self.scheduler.blocks_to_swap_out)
+    if self.scheduler.blocks_to_swap_in:                      # CPU→GPU 拷贝（迁回触发）
+        self.model_runner.call("swap_in", self.scheduler.blocks_to_swap_in)
     token_ids = self.model_runner.call("run", seqs, is_prefill)
     self.scheduler.postprocess(seqs, token_ids, is_prefill)
     outputs = [(seq.seq_id, seq.completion_token_ids) for seq in seqs if seq.is_finished]
@@ -134,15 +138,16 @@ def step(self):
 
 - 三段式数据流：
   - 调度器输出：`seqs: list[Sequence]` 与 `is_prefill: bool`（后者决定模型走 prefill 还是 decode 分支）
+  - 可选的拷贝步骤：调度器若在本步产出了 swap 块映射（`blocks_to_swap_out/blocks_to_swap_in`），模型前向前先执行 GPU↔CPU 拷贝；`cpu_offload_gb=0`（默认）时两张映射恒为空，直接跳过（详见第 3 课 §3.6）
   - 模型执行端输出：`token_ids: list[int]`（每个 seq 一个 token，仅 rank0 返回；见第 8 课）
   - 回写结果：由 `scheduler.postprocess` 更新 `Sequence` 的 token、计数器、状态，并回收 KV cache block
 
 #### 3.3.1 Prefill 分支：一次性把 prompt 读完
 
-对应第 2.3 节的“读题目”：只要 `waiting` 队列非空，[`Scheduler.schedule`](../../nanovllm/engine/scheduler.py#L29-L55) 优先从 `waiting` 取出 seq，为其分配 KV cache block，并把一整段 prompt（或分片）打包成一个 prefill batch 送入模型一次性计算所有位置的隐状态。注意：**只要产出了 prefill batch，本轮就不会再去 decode**（`return scheduled_seqs, True`）。
+对应第 2.3 节的“读题目”：只要 `waiting` 队列非空，[`Scheduler.schedule`](../../nanovllm/engine/scheduler.py#L40-L62) 优先从 `waiting` 取出 seq，为其分配 KV cache block，并把一整段 prompt（或分片）打包成一个 prefill batch 送入模型一次性计算所有位置的隐状态。注意：**只要产出了 prefill batch，本轮就不会再去 decode**（`return scheduled_seqs, True`）。
 
 ```python
-# Scheduler.schedule 中的 prefill 循环：逐条打包 waiting 头部的 seq，注意 L42 的 chunked prefill 约束。
+# Scheduler.schedule 中的 prefill 循环：逐条打包 waiting 头部的 seq，注意 L52 的 chunked prefill 约束。
 while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
     seq = self.waiting[0]
     remaining = self.max_num_batched_tokens - num_batched_tokens
@@ -161,12 +166,12 @@ while self.waiting and len(scheduled_seqs) < self.max_num_seqs:
 
 - 关键行为：
   - 每个 seq 的 `num_scheduled_tokens` 设为本轮要塞入 prefill batch 的 token 数量
-  - Chunked prefill：当 `waiting[0]` 单条的待填 token 数超过 `max_num_batched_tokens` 剩余时，只允许 batch 中的第一条 seq 被切分（[scheduler.py:L42](../../nanovllm/engine/scheduler.py#L42)）
-  - 前缀缓存命中时，`can_allocate` 返回已命中的 block 数，只有未命中部分参与本轮前向计算（[scheduler.py:L35-L39](../../nanovllm/engine/scheduler.py#L35-L39)；第 4 课详谈）
+  - Chunked prefill：当 `waiting[0]` 单条的待填 token 数超过 `max_num_batched_tokens` 剩余时，只允许 batch 中的第一条 seq 被切分（[scheduler.py:L52-L53](../../nanovllm/engine/scheduler.py#L52-L53)）
+  - 前缀缓存命中时，`can_allocate` 返回已命中的 block 数，只有未命中部分参与本轮前向计算（[scheduler.py:L45-L49](../../nanovllm/engine/scheduler.py#L45-L49)；第 4 课详谈）
 
 #### 3.3.2 Decode 分支：每步追加一个 token
 
-对应第 2.3 节的“写答案”：`waiting` 为空时，[`Scheduler.schedule`](../../nanovllm/engine/scheduler.py#L57-L73) 才会从 `running` 队列取出 seq，每个 seq 的 `num_scheduled_tokens` 固定为 1。送入模型前调用 `may_append`：若已用 block 的最后一格写满就分配新 block。
+对应第 2.3 节的“写答案”：`waiting` 为空时，[`Scheduler.schedule`](../../nanovllm/engine/scheduler.py#L80-L94) 才会从 `running` 队列取出 seq，每个 seq 的 `num_scheduled_tokens` 固定为 1。送入模型前调用 `may_append`：若已用 block 的最后一格写满就分配新 block。
 
 ```python
 # Scheduler.schedule 中的 decode 循环：while/else 配合 preempt，保证 KV 不够时队尾先被抢占。
@@ -185,11 +190,11 @@ while self.running and len(scheduled_seqs) < self.max_num_seqs:
         scheduled_seqs.append(seq)
 ```
 
-- 抢占机制：当 KV cache 不够继续 decode 任何一条 seq 时，`preempt` 会把队尾（或自身）的 seq 释放回 `waiting`，下一轮重新走 prefill 恢复（[scheduler.py:L60-L65, L75-L79](../../nanovllm/engine/scheduler.py#L60-L79)；详见第 3 课）
+- 抢占机制：当 KV cache 不够继续 decode 某条 seq 时，`preempt` 会抢占队尾（或自身）的 seq，且有两条出路：优先 SWAP——把 KV 搬到 CPU、进入 `swapped` 队列，等 GPU 有空位断点续跑；不行则退回 `waiting`、下一轮重新 prefill（触发点见 [scheduler.py:L81-L87](../../nanovllm/engine/scheduler.py#L81-L87)，决策逻辑 [scheduler.py:L97-L116](../../nanovllm/engine/scheduler.py#L97-L116)；详见第 3 课 §3.4–§3.6）
 
 ### 3.4 postprocess：回写 token 与完成判定
 
-模型返回的 `token_ids` 由 [`scheduler.postprocess`](../../nanovllm/engine/scheduler.py#L81-L92) 写回：计入 `num_cached_tokens`、调用 `hash_blocks` 做前缀复用的哈希登记（第 4 课）；仅当 seq 已竟本轮 prefill 所需的全部 token 时才 `append_token` 追加生成的 token，否则下轮继续 chunked prefill。对满足 EOS 或到达 `max_tokens` 的 seq，将状态置为 `FINISHED` 并 `deallocate` 其 KV cache。
+模型返回的 `token_ids` 由 [`scheduler.postprocess`](../../nanovllm/engine/scheduler.py#L125-L136) 写回：计入 `num_cached_tokens`、调用 `hash_blocks` 做前缀复用的哈希登记（第 4 课）；仅当 seq 已竟本轮 prefill 所需的全部 token 时才 `append_token` 追加生成的 token，否则下轮继续 chunked prefill。对满足 EOS 或到达 `max_tokens` 的 seq，将状态置为 `FINISHED` 并 `deallocate` 其 KV cache。
 
 ```python
 # Scheduler.postprocess：更新计数器 → （可选）append_token → 完成判定与资源回收。
@@ -207,8 +212,8 @@ def postprocess(self, seqs: list[Sequence], token_ids: list[int], is_prefill: bo
             self.running.remove(seq)
 ```
 
-- 完成条件：`token_id == eos` 且未设置 `ignore_eos`，或 `num_completion_tokens == max_tokens`（[scheduler.py:L89](../../nanovllm/engine/scheduler.py#L89)）
-- chunked prefill 回写只累计计数器、不 append（[scheduler.py:L86-L87](../../nanovllm/engine/scheduler.py#L86-L87)），避免未写完的 prompt 提前追加采样 token
+- 完成条件：`token_id == eos` 且未设置 `ignore_eos`，或 `num_completion_tokens == max_tokens`（[scheduler.py:L133](../../nanovllm/engine/scheduler.py#L133)）
+- chunked prefill 回写只累计计数器、不 append（[scheduler.py:L130-L131](../../nanovllm/engine/scheduler.py#L130-L131)），避免未写完的 prompt 提前追加采样 token
 
 ---
 
@@ -235,7 +240,7 @@ print("text:", outputs[0]["text"])
 print("token_ids:", outputs[0]["token_ids"])
 ```
 
-- 验收要点（依据代码）：`generate` 返回的每个元素为 `{"text": tokenizer.decode(token_ids), "token_ids": token_ids}`，其中 `token_ids` 来自每个 seq 的 `completion_token_ids`（见 [llm_engine.py:L84-L90](../../nanovllm/engine/llm_engine.py#L84-L90) 与 [llm_engine.py:L54](../../nanovllm/engine/llm_engine.py#L54)）
+- 验收要点（依据代码）：`generate` 返回的每个元素为 `{"text": tokenizer.decode(token_ids), "token_ids": token_ids}`，其中 `token_ids` 来自每个 seq 的 `completion_token_ids`（见 [llm_engine.py:L92-L97](../../nanovllm/engine/llm_engine.py#L92-L97) 与 [llm_engine.py:L62](../../nanovllm/engine/llm_engine.py#L62)）
 - 示例来源：[example.py](../../example.py) 与 [README.md §Quick Start](../../README.md#L35-L46)
 
 ### 4.2 课后自测题

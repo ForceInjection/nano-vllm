@@ -4,7 +4,7 @@
 
 **一句话概述**：一个推理请求在引擎内部长什么样 —— `Sequence` 是每个请求的"身份证"。
 
-nano-vllm 的核心数据结构 `Sequence` 承载了"一个推理请求"的全部状态：它保存 prompt 与生成 token，记录调度与 KV cache 相关的计数器与 `block_table`，其生命周期状态（WAITING/RUNNING/FINISHED）在调度器里不断变化。掌握 `Sequence` 后，后续课程里的调度与 KV cache 管理都有了落点。
+nano-vllm 的核心数据结构 `Sequence` 承载了"一个推理请求"的全部状态：它保存 prompt 与生成 token，记录调度与 KV cache 相关的计数器与 `block_table`，其生命周期状态（WAITING/RUNNING/SWAPPED/FINISHED）在调度器里不断变化。掌握 `Sequence` 后，后续课程里的调度与 KV cache 管理都有了落点。
 
 ### 1.1 课时安排
 
@@ -35,9 +35,10 @@ nano-vllm 的核心数据结构 `Sequence` 承载了"一个推理请求"的全�
 
 - `WAITING`≈ready：已入队，等待被调度。
 - `RUNNING`≈running：已分配 KV cache，每个 step 推进一步。
+- `SWAPPED`≈swapped out（被换出）：KV 块暂存 CPU 内存，等 GPU 有空块再换回——对应 OS 进程被换出到交换区的状态。
 - `FINISHED`≈terminated：命中 EOS 或达到 `max_tokens`，回收资源。
 
-OS 中的"抢占"在这里对应 `preempt`：当新请求需要 KV cache 但没有空闲 block 时，调度器会把某个 `RUNNING` 请求退回 `WAITING`，先释放它的 KV cache。这解释了为什么 `Sequence` 需要承载状态而不仅仅是数据。
+OS 中的"抢占"在这里对应 `preempt`：当 decode 需要新 KV cache block 但没有空闲时，调度器会抢占一个 `RUNNING` 请求。抢占后有两条出路：开启 CPU 卸载（`cpu_offload_gb>0`）且资源允许时走 SWAP（状态置 `SWAPPED`，KV 搬到 CPU，回来断点续跑）；否则走 RECOMPUTE（状态退回 `WAITING`，丢弃 KV，下一轮重算）。这解释了为什么 `Sequence` 需要承载状态而不仅仅是数据。
 
 ### 2.2 `block_table` ≈ 虚拟内存页表
 
@@ -52,32 +53,34 @@ KV cache 占显存大头，但每个请求的长度不一定；如果给每个�
 
 ## 3. Sequence：生命周期与字段
 
-先看一张生命周期状态机建立全局印象，再按字段分组逐个对齐到代码。阅读图时建议同时打开 `sequence.py`，把图中每个转移动作（`add_request`/`allocate`/`may_append`/`preempt`/`deallocate`）对齐到真实调用。
+先看一张生命周期状态机建立全局印象，再按字段分组逐个对齐到代码。阅读图时建议同时打开 `sequence.py`，把图中每个转移动作（`add_request`/`allocate`/`may_append`/`preempt`/`swap_out`/`swap_in`/`deallocate`）对齐到真实调用。
 
 ```mermaid
 stateDiagram-v2
     [*] --> WAITING: add_request
     WAITING --> RUNNING: schedule 首次选中 + allocate
     RUNNING --> RUNNING: decode 每步 may_append
-    RUNNING --> WAITING: KV 不足 preempt + deallocate
+    RUNNING --> SWAPPED: preempt + swap_out（KV 驻留 CPU）
+    RUNNING --> WAITING: preempt + recompute（丢弃 KV）
+    SWAPPED --> RUNNING: swap_in（GPU 有空块，断点续跑）
     RUNNING --> FINISHED: EOS / max_tokens + deallocate
     FINISHED --> [*]
 ```
 
-- 状态的主控方：`Scheduler` 在每个 step 保持两个队列（`waiting/running`）并驱动上述转移（详见第 3 课）；`Sequence` 本身只负责承载状态字段。
+- 状态的主控方：`Scheduler` 在每个 step 保持三个队列（`waiting/running/swapped`）并驱动上述转移（详见第 3 课）；`Sequence` 本身只负责承载状态字段。
 - 字段分组（下文§3.1–§3.4）：token_ids 类、调度计数器、KV cache 映射、TP 序列化。
 
 ### 3.1 token 与生成结果
 
-[`Sequence`](../../nanovllm/engine/sequence.py#L14-L31) 的 `token_ids` 持有"prompt + 已生成 token"的完整序列；`num_prompt_tokens` 固定为初始 prompt 长度；[`completion_token_ids`](../../nanovllm/engine/sequence.py#L51-L53) 则是 prompt 之后的生成部分。
+[`Sequence`](../../nanovllm/engine/sequence.py#L15-L32) 的 `token_ids` 持有"prompt + 已生成 token"的完整序列；`num_prompt_tokens` 固定为初始 prompt 长度；[`completion_token_ids`](../../nanovllm/engine/sequence.py#L52-L54) 则是 prompt 之后的生成部分。
 
 ### 3.2 调度相关计数器
 
-调度器用两个计数器推进 prefill（一次性处理用户输入的阶段）：[`num_cached_tokens`](../../nanovllm/engine/sequence.py#L25) 表示"已经在 KV cache 中可用"的 token 数；[`num_scheduled_tokens`](../../nanovllm/engine/sequence.py#L26) 表示"本 step 计划处理的 token 数"。在 [`Scheduler.postprocess`](../../nanovllm/engine/scheduler.py#L81-L92) 中，二者会被更新并清零（详见第 3 课）。
+调度器用两个计数器推进 prefill（一次性处理用户输入的阶段）：[`num_cached_tokens`](../../nanovllm/engine/sequence.py#L26) 表示"已经在 KV cache 中可用"的 token 数；[`num_scheduled_tokens`](../../nanovllm/engine/sequence.py#L27) 表示"本 step 计划处理的 token 数"。在 [`Scheduler.postprocess`](../../nanovllm/engine/scheduler.py#L125-L136) 中，二者会被更新并清零（详见第 3 课）。
 
 ### 3.3 KV cache 映射：block_table 与 block_size
 
-[`Sequence.block_table`](../../nanovllm/engine/sequence.py#L28) 是该请求持有的 block_id 列表；[`Sequence.block_size`](../../nanovllm/engine/sequence.py#L15) 是每个 block 的 token 容量。`num_blocks/last_block_num_tokens` 与 `block(i)` 帮我们把 token 序列切成 block 视角；我们可以把 block_table 理解成"这个请求的 KV cache 数据存在哪些内存块里"。
+[`Sequence.block_table`](../../nanovllm/engine/sequence.py#L29) 是该请求持有的 block_id 列表；[`Sequence.block_size`](../../nanovllm/engine/sequence.py#L16) 是每个 block 的 token 容量。`num_blocks/last_block_num_tokens` 与 `block(i)` 帮我们把 token 序列切成 block 视角；我们可以把 block_table 理解成"这个请求的 KV cache 数据存在哪些内存块里"。
 
 ```python
 # Sequence 把 token 序列切成 block 视角的三个入口：block 数、末块实际 token 数、按下标取 block。
@@ -98,7 +101,7 @@ def block(self, i):
 
 ### 3.4 序列的可序列化：为 Tensor Parallel 服务
 
-[`Sequence.__getstate__/__setstate__`](../../nanovllm/engine/sequence.py#L72-L83) 让对象在多进程场景中可被 pickle（Python 的对象序列化方式）。实现细节体现了一个关键选择：prefill 阶段需要完整 `token_ids`，而 decode 阶段子进程只需要 `last_token`——对应状态机中 `RUNNING` 状态下往返传递的数据体量。
+[`Sequence.__getstate__/__setstate__`](../../nanovllm/engine/sequence.py#L73-L84) 让对象在多进程场景中可被 pickle（Python 的对象序列化方式）。实现细节体现了一个关键选择：prefill 阶段需要完整 `token_ids`，而 decode 阶段子进程只需要 `last_token`——对应状态机中 `RUNNING` 状态下往返传递的数据体量。
 
 ```python
 # Sequence 的 pickle 协议：prefill 传全量 token_ids，decode 只传 last_token，以减少 IPC 带宽。
@@ -135,7 +138,7 @@ for n in [1, 4, 5, 8, 9]:
     print(n, "num_blocks=", seq.num_blocks, "last_block_num_tokens=", seq.last_block_num_tokens, "blocks=", [seq.block(i) for i in range(seq.num_blocks)])
 ```
 
-- 验收要点（依据代码）：`num_blocks = (num_tokens + block_size - 1) // block_size`，`last_block_num_tokens = num_tokens - (num_blocks - 1) * block_size`（见 [sequence.py:L55-L62](../../nanovllm/engine/sequence.py#L55-L62)）
+- 验收要点（依据代码）：`num_blocks = (num_tokens + block_size - 1) // block_size`，`last_block_num_tokens = num_tokens - (num_blocks - 1) * block_size`（见 [sequence.py:L56-L63](../../nanovllm/engine/sequence.py#L56-L63)）
 
 ### 4.2 课后自测题
 

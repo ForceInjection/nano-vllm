@@ -6,8 +6,11 @@ L03 练习：Scheduler 的队列、chunked prefill 与 preempt
 - prefill 从 waiting 队首取 seq，按 max_num_batched_tokens 限制拼 batch
 - 除首个 seq 外不允许 chunked prefill (remaining < num_tokens and scheduled_seqs → break)
 - decode 按 FIFO 从 running 取 seq，block 不够时 preempt
+- preempt 双路径：SWAP 优先（KV 搬 CPU、进 swapped 队列断点续跑），否则 RECOMPUTE 兜底；
+  swap_out/swap_in 元数据往返保留 num_cached_tokens（验证 6）
 
-依赖：无（纯 Python 模拟）
+依赖：§1-§5 纯 Python；§6 需 nanovllm 可导入（pip install -e . 或 PYTHONPATH=仓库根）；
+     §7 另需 transformers + 模型目录（argv 或 NANOVLLM_MODEL_PATH）
 用法：python L03_scheduler.py
 """
 
@@ -33,7 +36,7 @@ def show_code_block(title, file_path, lines):
     print()
 
 
-# ── prefill 模拟（对齐 scheduler.py:L29-L55）──────────────────────────
+# ── prefill 模拟（对齐 scheduler.py:L40-L62）──────────────────────────
 
 def simulate_prefill(prompt_lens, max_num_batched_tokens,
                      num_cached_tokens=None):
@@ -48,7 +51,7 @@ def simulate_prefill(prompt_lens, max_num_batched_tokens,
         if remaining == 0:
             break
         if remaining < num_tokens and scheduled:
-            break  # L42-L43: only chunked prefill for the first seq
+            break  # L52-L53: only chunked prefill for the first seq
         scheduled_tokens = min(num_tokens, remaining)
         scheduled.append((i, scheduled_tokens))
         remaining -= scheduled_tokens
@@ -56,11 +59,11 @@ def simulate_prefill(prompt_lens, max_num_batched_tokens,
     return scheduled, remaining
 
 
-# ── decode 模拟（对齐 scheduler.py:L57-L73）───────────────────────────
+# ── decode 模拟（对齐 scheduler.py:L80-L94）───────────────────────────
 
 def simulate_decode_step(running, free_block_ids, block_size=4):
     """
-    模拟一次 decode step（对齐 scheduler.py:L57-L73）。
+    模拟一次 decode step（对齐 scheduler.py:L80-L94）。
     关键: preempt 队尾 seq 时会释放它的 block，让当前 seq 可以继续。
     """
     scheduled = []
@@ -115,11 +118,11 @@ def verify_basic_batching():
 
     print("\n┌─────────────────────────────────────────────────────────────┐")
     print("│  1. prefill 基本批拼接                                      │")
-    print("│     对齐 scheduler.py:L29-L55                               │")
+    print("│     对齐 scheduler.py:L40-L62                               │")
     print("└─────────────────────────────────────────────────────────────┘\n")
 
     show_code_block("schedule() prefill 分支", "nanovllm/engine/scheduler.py",
-                     show_source("nanovllm/engine/scheduler.py", 29, 56))
+                     show_source("nanovllm/engine/scheduler.py", 40, 62))
 
     for label, prompts, max_batch in [
         ("三条都能塞入", [300, 300, 300], 1000),
@@ -138,7 +141,7 @@ def verify_basic_batching():
 def verify_chunked_prefill_constraint():
     print("\n┌─────────────────────────────────────────────────────────────┐")
     print("│  2. chunked prefill 限制: 仅 batch 中第一条可被切分           │")
-    print("│     scheduler.py:L42: remaining < num_tokens && scheduled → break │")
+    print("│     scheduler.py:L52-L53: remaining < num_tokens && scheduled → break │")
     print("└─────────────────────────────────────────────────────────────┘")
 
     scheduled, remaining = simulate_prefill([300, 800, 200], max_num_batched_tokens=1000)
@@ -156,7 +159,7 @@ def verify_chunked_prefill_constraint():
 def verify_prefix_cache_batching():
     print("\n┌─────────────────────────────────────────────────────────────┐")
     print("│  3. prefix cache 命中减少本轮 token 消耗                      │")
-    print("│     scheduler.py:L35-L39: num_tokens = n - cached_blocks*block_size │")
+    print("│     scheduler.py:L45-L51: num_tokens = n - cached_blocks*block_size │")
     print("└─────────────────────────────────────────────────────────────┘")
 
     scheduled, remaining = simulate_prefill(
@@ -176,12 +179,12 @@ def verify_prefix_cache_batching():
 
 def verify_decode_and_preempt():
     print("\n┌─────────────────────────────────────────────────────────────┐")
-    print("│  4. decode 调度 + preempt（对齐 scheduler.py:L57-L79）        │")
+    print("│  4. decode 调度 + preempt（对齐 scheduler.py:L80-L116）       │")
     print("│     can_append: free_blocks >= (len(seq) % block_size == 1) │")
     print("└─────────────────────────────────────────────────────────────┘\n")
 
     show_code_block("schedule() decode 分支 + preempt()", "nanovllm/engine/scheduler.py",
-                     show_source("nanovllm/engine/scheduler.py", 57, 80))
+                     show_source("nanovllm/engine/scheduler.py", 80, 116))
 
     block_size = 4
     running = deque([(0, 1), (1, 4), (2, 5)])  # (seq_id, current_length)
@@ -234,40 +237,108 @@ def verify_decode_and_preempt():
         print(line)
     assert len(scheduled) == 0
     assert preempted == [0]
-    print(f"  [PASS]")
+    print("  [PASS] （边界注记：'自身抢占后空批'是模拟器的简化——真实引擎此时无可调度 seq，")
+    print("         会在 scheduler.py:L93 的 assert 处中止；两者差异见第 3 课 §3.5）")
 
 
 # ── 验证 5: preempt 状态机 ────────────────────────────────────────────
 
 def verify_preempt_state_machine():
     print("\n┌─────────────────────────────────────────────────────────────┐")
-    print("│  5. preempt 状态机（对齐 scheduler.py:L75-L79）              │")
+    print("│  5. preempt 双路径状态机（对齐 scheduler.py:L97-L123）        │")
     print("└─────────────────────────────────────────────────────────────┘")
 
-    print(f"""
-    preempt(seq) 四步:
-      ① seq.status  = WAITING     # RUNNING → WAITING
-      ② seq.is_prefill = True     # 下一轮重新 prefill
-      ③ block_manager.deallocate  # 释放所有 KV cache block
-      ④ waiting.appendleft(seq)   # 插回队首，优先重试
+    print("""
+    preempt(seq) 现在是两层决策:
+      ① 护栏: 本 step 刚 swap_in 的 seq → GPU 块里 KV 还没拷回（是垃圾数据）
+              → 取消其 swap-in 映射，直接 _recompute
+              （绝不能把垃圾拷去 CPU，覆盖掉真身）
+      ② can_swap_out?  = CPU 空块够 且 所有块 ref_count==1（全部独占）
+         ├─ Yes → SWAP: 记 {gpu_id: cpu_id} 映射, status=SWAPPED, 入 swapped 队列
+         └─ No  → RECOMPUTE（_recompute，即旧版 preempt 四步）:
+                  status=WAITING, is_prefill=True, deallocate, waiting.appendleft
 
-    类比 OS: preempt ≈ swap out → swap in
-    差异: LLM 的 KV cache 可重算，preempt 只释放 block
-          不用写"交换区"，下一轮 prefill 重算即可恢复
+    类比 OS: SWAP 路径 = 真正的换出/换入（KV 写到 CPU pinned 内存，回来断点续跑）
+            RECOMPUTE = "计算换空间"——LLM 特有: KV 可由 token 序列确定性重算
+    开关: cpu_offload_gb>0 启用 swap；=0（默认）时 RECOMPUTE 是唯一出路
     """)
 
 
-# ── 验证 6: 真实 Scheduler 对比 ──────────────────────────────────────
+# ── 验证 6: BlockManager swap 元数据往返 ─────────────────────────────
+
+def verify_blockmanager_swap():
+    # 断言语义与 tests/test_swap_blockmanager.py（A1/A4/A5）保持一致——两边需同步维护。
+    print("\n┌─────────────────────────────────────────────────────────────┐")
+    print("│  6. BlockManager swap 元数据往返（对齐 block_manager.py:L126-L180）│")
+    print("│     cpu_offload_gb>0 时 preempt 优先走的路径；纯元数据，无需 GPU │")
+    print("└─────────────────────────────────────────────────────────────┘")
+
+    from nanovllm.engine.block_manager import BlockManager
+    from nanovllm.engine.sequence import Sequence
+
+    BLOCK = 4
+    old_block_size = Sequence.block_size
+    Sequence.block_size = BLOCK              # 进程级类属性，函数末尾恢复（§7 会按 Config 重设）
+    bm = BlockManager(num_blocks=10, block_size=BLOCK, num_cpu_blocks=10)
+    seq = Sequence(list(range(12)))          # 12 token → 3 个 block
+    bm.allocate(seq, bm.can_allocate(seq))
+    seq.num_cached_tokens = 8                # 模拟 decode 进行中：已缓存 8 token
+    gpu_blocks = list(seq.block_table)
+    print(f"\n  初始: seq 占 {len(gpu_blocks)} 个 GPU 块 {gpu_blocks}, num_cached_tokens={seq.num_cached_tokens}")
+
+    # ── swap_out：GPU → CPU（记 {gpu_id: cpu_id}，GPU 块归还池，页表清空但缓存数保留）──
+    assert bm.can_swap_out(seq)
+    out_mapping = bm.swap_out(seq)
+    print(f"  swap_out: {out_mapping}")
+    print(f"    seq.block_table = {seq.block_table} (清空)")
+    print(f"    seq.num_cached_tokens = {seq.num_cached_tokens} (刻意保留 → 断点续跑的凭证)")
+    print(f"    GPU 块归还 free 池; CPU 块占用: {sorted(bm.used_cpu_block_ids)}; 账本 swapped_block_tables={bm.swapped_block_tables}")
+    assert seq.block_table == []
+    assert seq.num_cached_tokens == 8
+    assert all(b in bm.free_block_ids for b in gpu_blocks)
+    assert set(out_mapping.values()) == bm.used_cpu_block_ids
+    assert bm.swapped_block_tables[seq.seq_id] == list(out_mapping.values())
+
+    # ── swap_in：CPU → GPU（分新 GPU 块、重建 block_table、释放 CPU 块）──
+    assert bm.can_swap_in(seq)
+    in_mapping = bm.swap_in(seq)
+    print(f"  swap_in : {in_mapping}")
+    print(f"    seq.block_table 重建为 {seq.block_table} (物理 id 可变, 数量/顺序不变)")
+    print(f"    CPU 块全部释放: used_cpu={sorted(bm.used_cpu_block_ids)}")
+    assert len(seq.block_table) == len(gpu_blocks)
+    assert seq.seq_id not in bm.swapped_block_tables
+    assert len(bm.used_cpu_block_ids) == 0
+    assert seq.num_cached_tokens == 8
+    print("  [PASS] 往返后块数不变、num_cached_tokens 保留 → decode 可断点续跑，无需重算")
+
+    # ── can_swap_out 的两条否决规则 ──
+    seq2 = Sequence(list(range(12)))
+    bm2 = BlockManager(num_blocks=10, block_size=BLOCK, num_cpu_blocks=2)
+    bm2.allocate(seq2, bm2.can_allocate(seq2))
+    assert not bm2.can_swap_out(seq2)
+    print("\n  can_swap_out 否决 1: CPU 空块不足 (2 < 3) → False（CPU 满时兜底 RECOMPUTE）")
+
+    seq3 = Sequence(list(range(12)))
+    bm3 = BlockManager(num_blocks=10, block_size=BLOCK, num_cpu_blocks=10)
+    bm3.allocate(seq3, bm3.can_allocate(seq3))
+    bm3.blocks[seq3.block_table[0]].ref_count = 2   # 模拟共享前缀块
+    assert not bm3.can_swap_out(seq3)
+    print("  can_swap_out 否决 2: 含共享块 ref_count=2 → False（共享块不能搬走，整体退回 RECOMPUTE）")
+    Sequence.block_size = old_block_size    # 恢复，避免向后续章节泄漏
+    print("  [PASS]")
+
+
+# ── 验证 7: 真实 Scheduler 对比 ──────────────────────────────────────
 
 def verify_with_real_scheduler(model_path):
     """用真实 Scheduler 跑一次，输出和模拟结果对比。"""
     from nanovllm.config import Config
     from nanovllm.engine.scheduler import Scheduler
-    from nanovllm.engine.sequence import Sequence
+    from nanovllm.engine.sequence import Sequence, SequenceStatus
     from nanovllm.sampling_params import SamplingParams
 
     print("\n┌─────────────────────────────────────────────────────────────┐")
-    print("│  6. 真实 Scheduler 对比验证                                  │")
+    print("│  7. 真实 Scheduler 对比验证                                  │")
     print("│     直接调用 scheduler.add() → schedule() → postprocess()   │")
     print("└─────────────────────────────────────────────────────────────┘")
 
@@ -346,6 +417,79 @@ def verify_with_real_scheduler(model_path):
         assert s.num_scheduled_tokens == 1
     print(f"    [PASS] decode 每 seq 处理 1 token")
 
+    # ── 场景 E: 强制抢占下的 SWAP 全流程（cpu_offload_gb>0 时 preempt 的优先出路）──
+    print(f"\n  ▸ 场景 E: 开启 CPU 卸载后强制抢占 —— 真实引擎里的 swap_out → swap_in")
+    config_e = Config(model_path, max_num_batched_tokens=4096, max_num_seqs=8,
+                      kvcache_block_size=256)
+    config_e.num_kvcache_blocks = 2       # 只给 2 个 GPU block，逼出抢占
+    config_e.num_cpu_kvcache_blocks = 8   # 模拟 cpu_offload_gb>0（实际由 ModelRunner 按显存换算写回）
+    config_e.eos = 0                      # 让 postprocess 能判定"完成"，从而释放 GPU block
+    sched = Scheduler(config_e)
+    print(f"    num_kvcache_blocks=2, num_cpu_kvcache_blocks=8（等价 cpu_offload_gb>0）, eos=0")
+
+    a = Sequence(list(range(256)), sp)    # 恰好占满 1 个 block（256 token）
+    b = Sequence(list(range(256)), sp)
+    for s in (a, b):
+        sched.add(s)
+    p_seqs, p_flag = sched.schedule()     # prefill 两条 → 占满 2 个 GPU block
+    sched.postprocess(p_seqs, [7, 8], p_flag)
+    print(f"    prefill 后: running={len(sched.running)}, "
+          f"free_gpu_blocks={len(sched.block_manager.free_block_ids)}")
+    print(f"    两条 seq 长度都到 {len(a)}（= 256+1）：下一次 decode 需要新 block，但 GPU 已满")
+
+    d_seqs, d_flag = sched.schedule()     # decode：队尾被抢占 → SWAP
+    print(f"    decode 调度: scheduled={[s.seq_id for s in d_seqs]}, is_prefill={d_flag}")
+    print(f"      blocks_to_swap_out={sched.blocks_to_swap_out} (gpu→cpu), "
+          f"swapped 队列={[s.seq_id for s in sched.swapped]}")
+    print(f"      被抢占 seq[{b.seq_id}]: status={b.status.name}, len={len(b)}, "
+          f"num_cached_tokens={b.num_cached_tokens}（原样保留 → 回来断点续跑）")
+    assert d_flag is False and [s.seq_id for s in d_seqs] == [a.seq_id]
+    assert b.status == SequenceStatus.SWAPPED and b in sched.swapped
+    # len(seq)=257 但只缓存了 256 个 token 的 KV（最后生成的 token 要等下一轮 decode 才算）
+    assert sched.blocks_to_swap_out and b.num_cached_tokens == 256
+    sched.postprocess(d_seqs, [9], d_flag)
+
+    d2_seqs, d2_flag = sched.schedule()   # A 继续 decode；GPU 仍无空块 → B 还迁不回来
+    print(f"    下一轮: scheduled={[s.seq_id for s in d2_seqs]}；B 仍在 swapped"
+          f"（can_swap_in=False，GPU 无空块）: {[s.seq_id for s in sched.swapped]}")
+    assert not sched.blocks_to_swap_in
+
+    sched.postprocess(d2_seqs, [config_e.eos], d2_flag)   # A 命中 EOS → 完成，释放全部 block
+    print(f"    A 命中 EOS 完成 → 释放 GPU block: "
+          f"free={len(sched.block_manager.free_block_ids)}")
+
+    d3_seqs, d3_flag = sched.schedule()   # swap-in 阶段把 B 迁回，继续 decode
+    print(f"    B 迁回: blocks_to_swap_in={sched.blocks_to_swap_in} (cpu→gpu), "
+          f"status={b.status.name}, num_cached_tokens={b.num_cached_tokens}")
+    print(f"      计数器: swap_out={sched.num_swapped_out_blocks}, "
+          f"swap_in={sched.num_swapped_in_blocks}, recompute={sched.num_recompute_preemptions}")
+    assert sched.blocks_to_swap_in and b.status == SequenceStatus.RUNNING
+    assert [s.seq_id for s in d3_seqs] == [b.seq_id] and b.num_cached_tokens == 256
+    print("    [PASS] SWAP 全流程：抢占搬出 → 等空块 → 迁回断点续跑（零重算）")
+
+    # ── 场景 E2（对照）: 同样的压力，关掉 CPU 卸载 → preempt 只能 RECOMPUTE ──
+    print(f"\n  ▸ 场景 E2（对照）: num_cpu_kvcache_blocks=0（cpu_offload_gb=0 的真实取值）")
+    config_r = Config(model_path, max_num_batched_tokens=4096, max_num_seqs=8,
+                      kvcache_block_size=256)
+    config_r.num_kvcache_blocks = 2
+    config_r.num_cpu_kvcache_blocks = 0
+    config_r.eos = 0
+    sched_r = Scheduler(config_r)
+    a2 = Sequence(list(range(256)), sp)
+    b2 = Sequence(list(range(256)), sp)
+    for s in (a2, b2):
+        sched_r.add(s)
+    p2_seqs, p2_flag = sched_r.schedule()
+    sched_r.postprocess(p2_seqs, [7, 8], p2_flag)
+    r_seqs, r_flag = sched_r.schedule()
+    print(f"    被抢占 seq[{b2.seq_id}]: status={b2.status.name}, "
+          f"num_cached_tokens={b2.num_cached_tokens}（归零，下一轮重算）")
+    assert b2.status == SequenceStatus.WAITING and b2 in sched_r.waiting
+    assert b2.num_cached_tokens == 0
+    assert not sched_r.blocks_to_swap_out          # 没有 swap：KV 直接被丢弃
+    assert sched_r.num_recompute_preemptions == 1
+    print("    [PASS] 同一压力、两条出路：SWAP 搬 KV（保留断点）vs RECOMPUTE 丢 KV（计数归零）")
+
 
 def main():
     import sys
@@ -361,6 +505,7 @@ def main():
     verify_prefix_cache_batching()
     verify_decode_and_preempt()
     verify_preempt_state_machine()
+    verify_blockmanager_swap()
     verify_with_real_scheduler(model_path)
 
     print("\n" + "=" * 64)

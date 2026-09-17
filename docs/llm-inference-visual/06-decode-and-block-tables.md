@@ -47,15 +47,15 @@ prefill 和 decode 虽然共用同一个 Transformer，但准备输入的代码�
 
 ### 3.1 input_ids 与 positions
 
-decode 只需要每个 seq 的最后一个 token 与它的绝对位置：[`input_ids.append(seq.last_token)`](../../nanovllm/engine/model_runner.py#L178)，`positions.append(len(seq) - 1)`。这对应自回归生成的基本事实：下一步只依赖"已生成的全部历史 + 当前输入 token"，而当前输入 token 就是上一步输出的 token。
+decode 只需要每个 seq 的最后一个 token 与它的绝对位置：[`input_ids.append(seq.last_token)`](../../nanovllm/engine/model_runner.py#L195)，`positions.append(len(seq) - 1)`。这对应自回归生成的基本事实：下一步只依赖"已生成的全部历史 + 当前输入 token"，而当前输入 token 就是上一步输出的 token。
 
 ### 3.2 context_lens：cache 的有效长度
 
-[`context_lens.append(len(seq))`](../../nanovllm/engine/model_runner.py#L180) 表示每个 seq 的上下文长度（prompt + 已生成 token 的总长度）。注意力算子用它来限定每个请求在 KV cache 中应访问的有效范围——"只看前面这么多个 token 的 K/V"。
+[`context_lens.append(len(seq))`](../../nanovllm/engine/model_runner.py#L197) 表示每个 seq 的上下文长度（prompt + 已生成 token 的总长度）。注意力算子用它来限定每个请求在 KV cache 中应访问的有效范围——"只看前面这么多个 token 的 K/V"。
 
 ### 3.3 slot_mapping：写入 KV cache 的最后一个 slot
 
-decode 每个 seq 只写入 1 个新 token，因此 `slot_mapping` 也是长度为 `bs` 的向量。[`prepare_decode`](../../nanovllm/engine/model_runner.py#L172-L188) 把"当前 seq 的最后一个 block"与"该 block 内 token 偏移"组合为一个线性 slot（位置编号）：
+decode 每个 seq 只写入 1 个新 token，因此 `slot_mapping` 也是长度为 `bs` 的向量。[`prepare_decode`](../../nanovllm/engine/model_runner.py#L189-L205) 把"当前 seq 的最后一个 block"与"该 block 内 token 偏移"组合为一个线性 slot（位置编号）：
 
 ```python
 # prepare_decode 的最小输入集：每个 seq 只送 last_token、当前位置、cache 长度，以及"末块中要写的那个 slot"。
@@ -68,11 +68,11 @@ for seq in seqs:
 
 ### 3.4 block_tables：把每个 seq 的 block_table padding 成矩阵
 
-注意力算子在 decode 阶段需要根据每个 seq 的 `block_table` 查找 KV cache 中的 block。为此，[`prepare_block_tables`](../../nanovllm/engine/model_runner.py#L123-L127) 会把不同长度的 `block_table` padding（补齐）到同一长度，并转为 `int32` GPU 张量。padding 值为 `-1`，表示"无效 block"（调用见 [model_runner.py:L186-L188](../../nanovllm/engine/model_runner.py#L186-L188)）。
+注意力算子在 decode 阶段需要根据每个 seq 的 `block_table` 查找 KV cache 中的 block。为此，[`prepare_block_tables`](../../nanovllm/engine/model_runner.py#L140-L144) 会把不同长度的 `block_table` padding（补齐）到同一长度，并转为 `int32` GPU 张量。padding 值为 `-1`，表示"无效 block"（调用见 [model_runner.py:L203](../../nanovllm/engine/model_runner.py#L203)）。
 
 ### 3.5 may_append：跨 block 边界时新增 block
 
-调度器在 decode 阶段会先检查 [`can_append(seq)`](../../nanovllm/engine/block_manager.py#L103-L104)，随后调用 [`may_append(seq)`](../../nanovllm/engine/block_manager.py#L106-L108)：当 `len(seq) % block_size == 1` 时，说明即将写入的 token 会落在新 block 上，需要分配一个新 block 并追加到 `seq.block_table`。
+调度器在 decode 阶段会先检查 [`can_append(seq)`](../../nanovllm/engine/block_manager.py#L107-L108)，随后调用 [`may_append(seq)`](../../nanovllm/engine/block_manager.py#L110-L112)：当 `len(seq) % block_size == 1` 时，说明即将写入的 token 会落在新 block 上，需要分配一个新 block 并追加到 `seq.block_table`。
 
 ```python
 # can_append / may_append：空闲池是否够下一步；以及"跨 block 边界"时追加新 block。
@@ -84,7 +84,7 @@ def may_append(self, seq: Sequence):
         seq.block_table.append(self._allocate_block())
 ```
 
-- 调用点：[scheduler.py:L60-L70](../../nanovllm/engine/scheduler.py#L60-L70)
+- 调用点：[scheduler.py:L80-L94](../../nanovllm/engine/scheduler.py#L80-L94)
 
 ---
 
@@ -120,8 +120,8 @@ for length in [7, 8, 9, 10]:
 ```
 
 - 验收要点（对应实现）：
-  - slot 公式：`slot_mapping.append(seq.block_table[-1] * block_size + seq.last_block_num_tokens - 1)`（见 [model_runner.py:L181-L182](../../nanovllm/engine/model_runner.py#L181-L182)）
-  - `may_append` 仅在 `len(seq) % block_size == 1` 时新分配 block 并追加到 `seq.block_table`（见 [block_manager.py:L106-L108](../../nanovllm/engine/block_manager.py#L106-L108)），`can_append` 据此判断空闲池是否足够（见 [block_manager.py:L103-L104](../../nanovllm/engine/block_manager.py#L103-L104)）
+  - slot 公式：`slot_mapping.append(seq.block_table[-1] * block_size + seq.last_block_num_tokens - 1)`（见 [model_runner.py:L198](../../nanovllm/engine/model_runner.py#L198)）
+  - `may_append` 仅在 `len(seq) % block_size == 1` 时新分配 block 并追加到 `seq.block_table`（见 [block_manager.py:L110-L112](../../nanovllm/engine/block_manager.py#L110-L112)），`can_append` 据此判断空闲池是否足够（见 [block_manager.py:L107-L108](../../nanovllm/engine/block_manager.py#L107-L108)）
 
 ### 4.2 课后自测题
 

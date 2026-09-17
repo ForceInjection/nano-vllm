@@ -14,7 +14,7 @@
 
 本课程所有关键结论均以仓库代码为依据。为了兼顾阅读流畅度与可核验性，代码引用按三种形式分层呈现：
 
-- **内联链接**：在行文首次提到某个符号时直接点击跳转，适合单一目标（例如推理主循环入口 [llm_engine.py:L49-L90](../../nanovllm/engine/llm_engine.py#L49-L90)）。
+- **内联链接**：在行文首次提到某个符号时直接点击跳转，适合单一目标（例如推理主循环入口 [llm_engine.py:L52-L93](../../nanovllm/engine/llm_engine.py#L52-L93)）。
 - **要点列表**：当一段逻辑涉及 ≥2 个代码位置（多文件、多行号段）时，用要点列表并列呈现。
 - **嵌入片段**：对于控制流密集、一眼即懂胜过千字的小函数或关键分支，直接从源码逐字摘录一段（≤ ~17 行）嵌入正文，并以行内注释点明要观察的点。
 
@@ -72,7 +72,7 @@
 
 **主题**：把"一个推理请求"实体化——`Sequence` 是每个请求在引擎内部的"身份证"。
 
-`Sequence` 同时承载三类信息：token 序列（prompt + 已生成 token）、调度计数器（`num_cached_tokens / num_scheduled_tokens / num_tokens`）、以及通往 KV cache 的 `block_table`。它的状态机在 WAITING / RUNNING / FINISHED 之间切换，恰好对应调度器里的行为分支。掌握这节课的字段语义后，后续调度与 KV cache 管理都有清晰的落点。
+`Sequence` 同时承载三类信息：token 序列（prompt + 已生成 token）、调度计数器（`num_cached_tokens / num_scheduled_tokens / num_tokens`）、以及通往 KV cache 的 `block_table`。它的状态机在 WAITING / RUNNING / SWAPPED / FINISHED 之间切换，恰好对应调度器里的行为分支。掌握这节课的字段语义后，后续调度与 KV cache 管理都有清晰的落点。
 
 ### 第 3 课：Scheduler 的队列、chunked prefill 与 preempt
 
@@ -80,7 +80,7 @@
 
 **主题**：调度器是怎么在"吞吐量优先"的约束下做批处理的，它的角色可以类比操作系统的进程调度器。
 
-本课沿着 `schedule()` 的代码路径，把 waiting / running 两个队列的流转讲清楚：prefill 阶段怎么拼 batch、`max_num_seqs` 与 `max_num_batched_tokens` 如何卡住批大小、decode 阶段 KV cache block 不足时怎样执行 preempt（把某个请求临时退回 waiting 以腾出资源）。最终产出一张调度流程图，每个分支条件都能对应回代码位置。
+本课沿着 `schedule()` 的代码路径，把 waiting / running / swapped 三个队列的流转讲清楚：prefill 阶段怎么拼 batch、`max_num_seqs` 与 `max_num_batched_tokens` 如何卡住批大小、decode 阶段 KV cache block 不足时怎样执行 preempt——开启 CPU 卸载（`cpu_offload_gb>0`）后优先 SWAP（KV 搬到 CPU，进 swapped 队列断点续跑），否则退回 waiting 丢弃重算（RECOMPUTE）。最终产出一张调度流程图，每个分支条件都能对应回代码位置。
 
 ### 第 4 课：BlockManager 与 prefix caching
 
@@ -156,7 +156,7 @@ bash run_all.sh L03 L05
 | ------------------------------------------------------------ | -------- | ---------------- | --------------------------------------------------------------------------------- |
 | [L01_end_to_end.py](./scripts/L01_end_to_end.py)             | 第 1 课  | GPU + 模型       | 端到端推理链路：`LLM.generate` → `step` 三段式 → 返回结构                         |
 | [L02_sequence.py](./scripts/L02_sequence.py)                 | 第 2 课  | nano-vllm (CPU)  | Sequence 字段、block 切分公式、pickle 协议                                        |
-| [L03_scheduler.py](./scripts/L03_scheduler.py)               | 第 3 课  | nano-vllm (CPU)  | prefill 批拼接规则、chunked prefill 限制、decode + preempt，含真实 Scheduler 对比 |
+| [L03_scheduler.py](./scripts/L03_scheduler.py)               | 第 3 课  | nano-vllm (CPU)  | prefill 批拼接规则、chunked prefill 限制、decode + preempt（SWAP/RECOMPUTE）、swap 元数据往返；§7 在真实 Scheduler 上跑 SWAP 全流程（搬出→迁回断点续跑）与 RECOMPUTE 对照 |
 | [L04_block_manager.py](./scripts/L04_block_manager.py)       | 第 4 课  | nano-vllm (CPU)  | 链式哈希、prefix cache 命中、ref_count 引用计数                                   |
 | [L05_prefill_batching.py](./scripts/L05_prefill_batching.py) | 第 5 课  | torch + 模型路径 | cu_seqlens 展平拼接、slot_mapping 构造、Context 注入                              |
 | [L06_decode.py](./scripts/L06_decode.py)                     | 第 6 课  | torch + 模型路径 | decode slot 公式、may_append 触发条件、prefill/decode 张量对比                    |

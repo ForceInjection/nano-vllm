@@ -4,7 +4,7 @@
 
 **一句话概述**：KV cache 的显存是怎么管理的——BlockManager 就像操作系统课里的内存分页管理器，把显存切成固定大小的 block 来分配和回收。
 
-注意力需要访问所有历史 token 的 K/V 向量，KV cache 因此占用大量 GPU 显存，需要精细管理。nano-vllm 把 KV cache 管理抽象为一个 block 池：空闲池 `free_block_ids`、占用集合 `used_block_ids`、以及用哈希表 `hash_to_block_id` 支撑的 prefix caching（类似操作系统的共享只读页：相同前缀的 KV cache block 被多个请求复用，无需重复计算和分配）。理解 `can_allocate/allocate/deallocate/hash_blocks` 的分工后，我们就能解释调度器为什么在 `postprocess()` 中调用 `hash_blocks()`。
+注意力需要访问所有历史 token 的 K/V 向量，KV cache 因此占用大量 GPU 显存，需要精细管理。nano-vllm 把 KV cache 管理抽象为一个 block 池：空闲池 `free_block_ids`、占用集合 `used_block_ids`、以及用哈希表 `hash_to_block_id` 支撑的 prefix caching（类似操作系统的共享只读页：相同前缀的 KV cache block 被多个请求复用，无需重复计算和分配）。理解 `can_allocate/allocate/deallocate/hash_blocks` 的分工后，我们就能解释调度器为什么在 `postprocess()` 中调用 `hash_blocks()`；本课末尾还会介绍 swap 抢占使用的 CPU 块池（§3.6）——它是一组"只记账、不共享"的平行账本。
 
 ### 1.1 课时安排
 
@@ -22,6 +22,7 @@
 - `Sequence.block_table` 在"逻辑序列"与"物理 KV cache"之间起什么桥接作用？
 - prefix caching 的命中条件是什么？它如何减少新分配的 block 数量？
 - `ref_count`（引用计数，和操作系统课里的概念一样）的意义是什么？为什么同一个 block 可以被多个 seq 复用？
+- swap 抢占为什么只允许搬走"全部独占"（`ref_count == 1`）的块？CPU 块池与 GPU 块池的分工有何不同？
 
 ---
 
@@ -56,15 +57,15 @@ BlockManager 要解决两个问题：显存里几十 GB 的 KV cache 如何被�
 
 ### 3.1 全局池与映射表
 
-[`BlockManager`](../../nanovllm/engine/block_manager.py#L26-L34) 持有全部 block 的元数据列表 `blocks`，并用 `free_block_ids/used_block_ids` 维护可分配与已占用 block 的集合。prefix caching 则由 `hash_to_block_id` 维护哈希到 block_id 的映射。
+[`BlockManager`](../../nanovllm/engine/block_manager.py#L26-L37) 持有全部 block 的元数据列表 `blocks`，并用 `free_block_ids/used_block_ids` 维护可分配与已占用 block 的集合。prefix caching 则由 `hash_to_block_id` 维护哈希到 block_id 的映射。
 
 ### 3.2 Block 元数据：ref_count 与 token_ids
 
-[每个 `Block`](../../nanovllm/engine/block_manager.py#L8-L23) 记录 `ref_count`（引用计数：有多少个 seq 在使用这个 block）、`hash`（该 block 对应前缀链的哈希值）与 `token_ids`（用于二次校验，避免哈希碰撞——即两个不同输入算出相同哈希值——导致错误复用）。
+[每个 `Block`](../../nanovllm/engine/block_manager.py#L8-L24) 记录 `ref_count`（引用计数：有多少个 seq 在使用这个 block）、`hash`（该 block 对应前缀链的哈希值）与 `token_ids`（用于二次校验，避免哈希碰撞——即两个不同输入算出相同哈希值——导致错误复用）。
 
 ### 3.3 can_allocate：计算可复用的 cached blocks
 
-[`can_allocate(seq)`](../../nanovllm/engine/block_manager.py#L58-L73) 会按 block 顺序为每个 block 计算链式哈希，并尝试在 `hash_to_block_id` 中找到候选 block。如果候选 block 的 `token_ids` 与 seq 当前 block 完全一致，则判定命中并累加 `num_cached_blocks`；命中后还会根据 `used_block_ids` 决定这次分配到底需要新增多少 block。
+[`can_allocate(seq)`](../../nanovllm/engine/block_manager.py#L62-L77) 会按 block 顺序为每个 block 计算链式哈希，并尝试在 `hash_to_block_id` 中找到候选 block。如果候选 block 的 `token_ids` 与 seq 当前 block 完全一致，则判定命中并累加 `num_cached_blocks`；命中后还会根据 `used_block_ids` 决定这次分配到底需要新增多少 block。
 
 ```python
 # BlockManager.can_allocate：逐块计算链式哈希 → 命中且 token_ids 全等则累加缓存块；最后按 free 池判断是否够新块。
@@ -88,11 +89,24 @@ def can_allocate(self, seq: Sequence) -> int:
 
 ### 3.4 allocate：复用与新分配的组合
 
-[`allocate(seq, num_cached_blocks)`](../../nanovllm/engine/block_manager.py#L75-L92) 先把命中的 cached blocks 加入 `seq.block_table`（可能增加 `ref_count`），再为剩余 blocks 从 `free_block_ids` 中分配新 block，最后设置 `seq.num_cached_tokens = num_cached_blocks * block_size`。
+[`allocate(seq, num_cached_blocks)`](../../nanovllm/engine/block_manager.py#L79-L96) 先把命中的 cached blocks 加入 `seq.block_table`（可能增加 `ref_count`），再为剩余 blocks 从 `free_block_ids` 中分配新 block，最后设置 `seq.num_cached_tokens = num_cached_blocks * block_size`。
 
 ### 3.5 hash_blocks：在合适时机写回可复用信息
 
-[`hash_blocks(seq)`](../../nanovllm/engine/block_manager.py#L110-L120) 会对本 step 新完成的整块 token 做哈希计算，并把 `(hash -> block_id)` 写回 `hash_to_block_id`。调度器在 [`postprocess()` 的最开头](../../nanovllm/engine/scheduler.py#L81-L85)调用它，使得"刚刚完成写入 KV cache 的 block"可以尽快被后续请求复用（尤其是多个请求共享前缀时）。
+[`hash_blocks(seq)`](../../nanovllm/engine/block_manager.py#L114-L124) 会对本 step 新完成的整块 token 做哈希计算，并把 `(hash -> block_id)` 写回 `hash_to_block_id`。调度器在 [`postprocess()` 的最开头](../../nanovllm/engine/scheduler.py#L125-L129)调用它，使得"刚刚完成写入 KV cache 的 block"可以尽快被后续请求复用（尤其是多个请求共享前缀时）。
+
+### 3.6 CPU 块池：swap 抢占的"停车场"
+
+开启 CPU 卸载（`cpu_offload_gb > 0`）后，BlockManager 多出一组与 GPU 池平行的元数据（[block_manager.py:L34-L37](../../nanovllm/engine/block_manager.py#L34-L37)）：`free_cpu_block_ids / used_cpu_block_ids` 两张集合，外加 `swapped_block_tables`（seq_id → CPU 块 id 列表）。与 GPU 池最大的差异：**CPU 块不参与哈希与前缀缓存**——它们只是临时停放位，不对外共享（vLLM 在 CPU 侧维护完整前缀缓存，nano 把它留作扩展）。
+
+四个方法构成一次完整往返，全部是纯元数据操作、不触碰张量：
+
+- [`can_swap_out`](../../nanovllm/engine/block_manager.py#L135-L140)：CPU 空块够用，**且** seq 的所有 GPU 块 `ref_count == 1`（全部独占）。共享块不能搬走——另一个序列可能还在 GPU 上读它；含共享块的 seq 整体退回 RECOMPUTE，不做部分 swap。
+- [`swap_out`](../../nanovllm/engine/block_manager.py#L142-L156)：为每个 GPU 块分配一个 CPU 块，记下 `{gpu_id: cpu_id}` 映射；GPU 块归还 free 池（沿用 deallocate 语义，`.hash` 保留、由复用时的 `_allocate_block` 清理）；`seq.block_table` 清空，但 `num_cached_tokens` 刻意保留——这是"断点续跑"的凭证。
+- [`can_swap_in`](../../nanovllm/engine/block_manager.py#L158-L159)：GPU 空块是否够放整张 CPU 块表。
+- [`swap_in`](../../nanovllm/engine/block_manager.py#L161-L180)：给每个 CPU 块分配新 GPU 块、按原顺序重建 `seq.block_table`、释放 CPU 块；返回 `{cpu_id: gpu_id}` 供模型执行端拷贝。末尾还会为序列的**完整 block** 重建哈希链——新分配的 GPU 块已被 `_allocate_block` 重置（`hash=-1`），若不重修，被 swap 的序列会静默退出前缀缓存，且其后完成的块会以 `seed=-1` 接链（接错前缀）。
+
+真正的数据搬运只有一行切片（[kv_swap.py](../../nanovllm/engine/kv_swap.py#L13-L14)），在模型执行端完成——BlockManager 自始至终只管账本，这个分层与 GPU 池完全一致。调度侧何时调用这些方法，见第 3 课 §3.4–§3.6。
 
 ---
 
@@ -138,9 +152,9 @@ print("num_cached_tokens :", num_cached_blocks * block_size)
 ```
 
 - 验收要点（依据代码）：
-  - `compute_hash(token_ids, prefix)` 会先写入 prefix（若存在），再写入当前 block 的 token 字节序列（见 [block_manager.py:L35-L41](../../nanovllm/engine/block_manager.py#L35-L41)）
-  - `can_allocate` 通过链式 hash 与 `token_ids` 全等校验累加 `num_cached_blocks`（见 [block_manager.py:L58-L73](../../nanovllm/engine/block_manager.py#L58-L73)）；`allocate` 据此只为剩余块从 `free_block_ids` 新分配，并把 `seq.num_cached_tokens` 置为 `num_cached_blocks * block_size`（见 [block_manager.py:L75-L93](../../nanovllm/engine/block_manager.py#L75-L93)）
-  - `hash_blocks` 只对"已完成的整块"写回 `hash_to_block_id`，最后一个未满 block 不会参与前缀命中（见 [block_manager.py:L110-L120](../../nanovllm/engine/block_manager.py#L110-L120)）
+  - `compute_hash(token_ids, prefix)` 会先写入 prefix（若存在），再写入当前 block 的 token 字节序列（见 [block_manager.py:L39-L45](../../nanovllm/engine/block_manager.py#L39-L45)）
+  - `can_allocate` 通过链式 hash 与 `token_ids` 全等校验累加 `num_cached_blocks`（见 [block_manager.py:L62-L77](../../nanovllm/engine/block_manager.py#L62-L77)）；`allocate` 据此只为剩余块从 `free_block_ids` 新分配，并把 `seq.num_cached_tokens` 置为 `num_cached_blocks * block_size`（见 [block_manager.py:L79-L96](../../nanovllm/engine/block_manager.py#L79-L96)）
+  - `hash_blocks` 只对"已完成的整块"写回 `hash_to_block_id`，最后一个未满 block 不会参与前缀命中（见 [block_manager.py:L114-L124](../../nanovllm/engine/block_manager.py#L114-L124)）
 
 ### 4.2 课后自测题
 

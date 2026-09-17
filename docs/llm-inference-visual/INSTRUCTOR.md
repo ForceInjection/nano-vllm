@@ -44,20 +44,21 @@
 
 ### 第 3 课（90 min）：Scheduler
 
-**重点**：这是学生第一次看到"操作系统概念在 Python 代码里落地"，preempt 机制是高潮。
+**重点**：这是学生第一次看到"操作系统概念在 Python 代码里落地"，preempt 机制是高潮——现在的 preempt 是 SWAP 优先、RECOMPUTE 兜底的双路径决策（`cpu_offload_gb` 开启前后行为不同，建议对比演示）。
 
-| 阶段     | 时长   | 要点                                                                  |
-| -------- | ------ | --------------------------------------------------------------------- |
-| 概念回顾 | 10 min | OS 调度器类比：waiting=ready queue, running=running, preempt=swap out |
-| 代码走读 | 40 min | prefill 循环 + chunked prefill 限制；decode 循环 + preempt            |
-| 动手练习 | 25 min | L03 脚本的模拟部分，观察 chunked prefill 限制                         |
-| 答疑     | 15 min |                                                                       |
+| 阶段     | 时长   | 要点                                                                                  |
+| -------- | ------ | -------------------------------------------------------------------------------------- |
+| 概念回顾 | 10 min | OS 调度器类比：waiting=ready queue, running=running, swapped=swapped out, preempt=抢占 |
+| 代码走读 | 40 min | prefill 循环 + chunked prefill 限制；decode 循环 + preempt（SWAP/RECOMPUTE）；swap-in 与 step 拷贝顺序 |
+| 动手练习 | 25 min | L03 脚本的模拟部分，观察 chunked prefill 限制与 swap 元数据往返                        |
+| 答疑     | 15 min | SWAP 与 RECOMPUTE 的取舍：何时交换、何时重算（设计文档 §10.E 实测数据可作讨论材料）    |
 
 **常见卡点**：
 
 - `remaining < num_tokens and scheduled_seqs` → break：这是最微妙的条件，建议用黑板画三条 seq、逐个 token 预算推进
-- preempt 为什么不保存 KV cache？让学生对比 OS swap：page 可以写回磁盘，KV cache 不行（太大），只能重算
-- 第 6 节（真实 Scheduler 对比）可作为"彩蛋"——跑完模拟再看真实输出完全一致
+- "preempt 保不保存 KV cache"要分两层讲：默认 RECOMPUTE（丢弃重算，实现最简）；`cpu_offload_gb>0` 后优先 SWAP（KV 搬到 CPU pinned 内存，断点续跑）。对比 OS：page 写回磁盘，nano 的 KV 写回 CPU 内存，重算降级为 CPU 也满时的兜底。可追问：为什么 0.6B 小模型上两条路吞吐持平？（传输成本 ≈ 重算成本，见设计文档 §10.E）
+- 两道好的"为什么会这样"讨论题：共享块为什么不能 swap（`ref_count>1` 整体退回 RECOMPUTE）；本 step 刚换入的 seq 为什么不能再换出（GPU 块里还是垃圾 KV，护栏逻辑见 scheduler.py `preempt` 开头）
+- 第 7 节（真实 Scheduler 对比）可作为"彩蛋"——跑完模拟再看真实输出完全一致；末尾的场景 E/E2 会在真实引擎里跑一遍完整的 SWAP 全流程（抢占搬出 → 等 A 完成释放块 → 迁回断点续跑）并给出 RECOMPUTE 对照，是讲"两条出路"时最直观的现场演示
 
 ### 第 4 课（90 min）：BlockManager
 
@@ -146,7 +147,7 @@
 
 ## 教学建议
 
-- 配套示意图：L01/L02/L03/L07 使用 Mermaid 内嵌于 markdown；L04/L05/L06/L08 使用 draw.io（`diagrams/` 下有 `.drawio` 源文件和 `.png` 导出图）
+- 配套示意图：L01/L02/L07 使用 Mermaid 内嵌于 markdown；L04/L05/L06/L08 使用 draw.io（`diagrams/` 下有 `.drawio` 源文件和 `.png` 导出图）；L03 两者兼有——mermaid 调度流程图内嵌正文，三队列与 swap 数据流另绘 `diagrams/L03-swap-queues.drawio/.png`
 - 建议每位学生提前搭建好环境，或者在机房统一提供 GPU 服务器
 - `scripts/run_all.sh` 可以作为每课结束后的"验证信号"——跑通了就表示理解了
 

@@ -196,3 +196,7 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+
+# Claude Code 本地配置与 skill
+#  .claude/skills/ 内含内网环境信息（IP、路径），绝对不能入库——通用方法已写入 README「开发：验证与调试」一节
+.claude/

@@ -88,5 +88,29 @@ The full compile/run/debug workflow for GPU verification (remote GPU box, contai
 - Only Qwen3-0.6B model architecture is implemented
 - `flash-attn` may fail to `pip install` from source (CPU/memory heavy). Download the pre-built wheel from GitHub releases matching the torch+CUDA version (e.g. `flash_attn-2.8.3+cu12torch2.8cxx11abiTRUE-cp312-cp312-linux_x86_64.whl`). Use `ghproxy.net` if GitHub is unreachable.
 - Course exercise scripts (`docs/llm-inference-visual/scripts/`) are self-contained but share a common `show_source()`/`show_code_block()` helper for displaying nano-vllm source snippets inline. Scripts that need the model accept `sys.argv[1]` or the `NANOVLLM_MODEL_PATH` env var.
-- `AGENTS.md` covers: agent role definitions, standard bug-fix/performance-change workflows, output templates, and documentation conventions for the visual course (Chinese prose, lesson structure, diagram conventions, 3-tier code reference system). Consult it when authoring or editing course materials under `docs/llm-inference-visual/`.
 - `docs/llm-inference-visual/slides/` is a Node/Reveal.js slide SPA (served via `serve_spa.py`) and ships a committed `node_modules/`. Exclude it from code searches — it contains thousands of vendored `.py`/`.js` files unrelated to nano-vllm.
+
+## Working conventions
+
+- Change only the modules required for the requested behavior; avoid drive-by refactors unless they are necessary for correctness. Keep public API changes explicit and documented.
+- Never log or persist prompts, completions, tokens, or model-weight paths unless a user-facing feature requires it; do not add telemetry, network calls, or background uploads.
+- Avoid introducing non-determinism unless it is an intentional and documented trade-off.
+- **Bug fixes**: add a runnable reproduction (script or minimal failing snippet) first, apply a targeted fix, then re-run the reproduction to confirm. If the bug affects generation, validate through the public `LLM.generate` API.
+- **Performance changes**: state the hypothesis, run `bench.py` and record configuration + results (matching the README benchmark fields), and state any accuracy, determinism, or memory trade-offs.
+
+## Documentation conventions
+
+- Use Markdown (avoid HTML tags) when adding or editing docs. Keep headings numbered by section level, with the top-level title unnumbered. Every code block carries an in-block comment explaining what the snippet does.
+
+### Visual course (`docs/llm-inference-visual/`)
+
+- **Audience and language**: lessons are written in Chinese for CS undergraduates whose only prerequisite is Python. LLM-specific concepts (Transformer, attention, KV cache) must be introduced where they are first needed rather than assumed.
+- **Narrative voice**: first-person plural (我们) for shared derivations, outcomes, and interpretive framings; third-person (读者) for prior-knowledge conditionals and ToC signposting (e.g. “如果读者已经了解…可以跳到…”). Avoid second-person 你/您 outside literal example strings such as tokenization inputs (`"你好"`).
+- **Lesson structure**: each `Lxx-*.md` follows the canonical four-section layout — §1 本课概述 (with 1.1 课时安排 and 1.2 学习目标), §2 原理铺垫 / 原理说明, §3 代码走读, §4 练习. Keep section numbering consistent so cross-lesson references remain stable.
+- **OS analogies**: when a mechanism mirrors an operating-systems concept (paging, reference counting, shared read-only pages, spawn + shared-memory IPC), name the analogy explicitly so the audience can anchor on prior coursework — as a one-line aside, not a substitute for the code walkthrough.
+- **Diagram assets** live under `docs/llm-inference-visual/diagrams/`, each keeping both the draw.io source (`Lxx-*.drawio`) and the exported preview (`Lxx-*.png`); the `Lxx` prefix must match the lesson number. Labels should mirror code field names (`waiting/running/block_table/slot_mapping/block_tables`), and each diagram carries a corner note with the source file basename so readers can jump back to the implementation.
+- **Code references** use three tiers, chosen per context:
+  - **Inline link (Tier 1)**: link on the first mention of a symbol when one file / line range is enough.
+  - **Bullet list (Tier 2)**: a dedicated bullet list when a section references ≥2 code locations, or anchors need to sit parallel to data-flow / behavior bullets.
+  - **Embedded snippet (Tier 3)**: when a small function, control-flow branch, or subtle one-liner drives the conclusion, copy ≤ ~17 lines verbatim from source into the prose. The first line must be an in-block comment pointing out what to observe; keep the preceding inline anchor — the snippet is a zoom-in, not a replacement.
+- Canonical example of all three tiers together: `01-llm-generate-and-step.md` §3.

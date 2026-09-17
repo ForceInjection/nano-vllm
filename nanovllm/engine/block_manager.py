@@ -166,4 +166,15 @@ class BlockManager:
             mapping[cpu_id] = block_id
             seq.block_table.append(block_id)
             self._deallocate_cpu_block(cpu_id)
+        # The restored GPU blocks are freshly allocated, so _allocate_block has reset their
+        # hash/token_ids. Rebuild the hash chain for the sequence's complete blocks — otherwise
+        # these blocks silently drop out of the prefix cache, and blocks completed after the
+        # swap-in would be hashed with seed -1 (a wrong prefix chain).
+        h = -1
+        for i in range(seq.num_cached_tokens // self.block_size):
+            block = self.blocks[seq.block_table[i]]
+            token_ids = seq.block(i)
+            h = self.compute_hash(token_ids, h)
+            block.update(h, token_ids)
+            self.hash_to_block_id[h] = block.block_id
         return mapping

@@ -86,7 +86,7 @@ def can_swap_in(self, seq) -> bool               # GPU 空块是否够
 def swap_in(self, seq) -> dict[int, int]         # 分配 GPU 块，返回 {cpu_id: gpu_id}，重建 seq.block_table，释放 CPU 块
 ```
 
-**MVP 简化**：CPU 块不参与前缀哈希，仅作为临时存放位——swap_out 时记录 `gpu_id -> cpu_id` 映射并释放 GPU 块；swap_in 时分配新 GPU 块、拷回、重建 `block_table`，随后按需重新 `hash_blocks`。（vLLM 在 CPU 侧同样维护完整的 prefix-cache，本设计将其作为后续扩展。）
+**MVP 简化**：CPU 块不参与前缀哈希，仅作为临时存放位——swap_out 时记录 `gpu_id -> cpu_id` 映射并释放 GPU 块；swap_in 时分配新 GPU 块、拷回、重建 `block_table`，并**为序列的完整 block 重建哈希链**（`swap_in` 末尾的循环：新块已被 `_allocate_block` 重置为 `hash=-1`，不重修则被 swap 的序列静默退出前缀缓存，其后完成的块还会以 `seed=-1` 接错链）。回归测试见 `tests/test_swap_blockmanager.py::test_swap_in_rebuilds_prefix_cache_registration`。（vLLM 在 CPU 侧同样维护完整的 prefix-cache，本设计将其作为后续扩展。）
 
 **共享块规则**：一个序列当且仅当其所有块 `ref_count == 1`（全部独占）时才允许 swap_out；只要含有与其他序列共享的块（`ref_count > 1`），即退回 RECOMPUTE。此规则避免了"共享块被迁至 CPU、而 swap_in 时另一持有者仍需其驻留 GPU 或该块已被逐出"的一致性问题；退回路径本已存在，代价可接受，换取实现的显著简化。`can_swap_out(seq)` 需同时校验"CPU 空块足够"与"seq 全部块独占"。
 
@@ -270,7 +270,7 @@ LLMEngine.step()
 | ---------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
 | `nanovllm/config.py`               | 新增 `cpu_offload_gb` 开关与 `num_cpu_kvcache_blocks` 回写字段                                                             |
 | `nanovllm/engine/sequence.py`      | 新增 `SWAPPED` 状态；保证 `num_cached_tokens` 在 swap 路径不清零                                                           |
-| `nanovllm/engine/block_manager.py` | CPU 块池 + `can_swap_out/swap_out/can_swap_in/swap_in`（仅元数据）                                                         |
+| `nanovllm/engine/block_manager.py` | CPU 块池 + `can_swap_out/swap_out/can_swap_in/swap_in`（仅元数据）；`swap_in` 末尾重建前缀哈希链                           |
 | `nanovllm/engine/kv_swap.py`（新） | `swap_blocks(src, dst, mapping)` 纯拷贝函数（无 torch import，便于单测）                                                   |
 | `nanovllm/engine/model_runner.py`  | `cpu_kv_cache` 张量 + `swap_out/swap_in`（调用 `swap_blocks`）；`num_kvcache_blocks` 作 GPU 块数上限                       |
 | `nanovllm/engine/scheduler.py`     | `swapped` 队列；swap 感知的 `preempt`（含换入护栏 + `_recompute`）；swap-in 阶段；观测计数器；`is_finished` 计入 `swapped` |

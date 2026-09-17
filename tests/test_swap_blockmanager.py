@@ -81,6 +81,30 @@ def test_swap_round_trip_logical_length_preserved():
     assert len(bm.used_cpu_block_ids) == 0
 
 
+def test_swap_in_rebuilds_prefix_cache_registration():
+    # Regression: swap_in allocates fresh GPU blocks, and _allocate_block resets their
+    # hash/token_ids — the resumed sequence used to silently lose its prefix-cache registration
+    # (and any later completed block was chained with seed -1). Assert the chain is rebuilt and
+    # a subsequent sequence can actually share the prefix.
+    bm = BlockManager(num_blocks=10, block_size=BLOCK, num_cpu_blocks=10)
+    seq = make_seq(12)                     # 3 blocks
+    allocate_fresh(bm, seq)
+    seq.num_cached_tokens = 8              # 2 complete blocks (the third is still partial)
+    bm.swap_out(seq)
+    bm.swap_in(seq)
+
+    for i in range(2):
+        block = bm.blocks[seq.block_table[i]]
+        assert block.hash != -1, "block dropped out of the prefix cache after a swap roundtrip"
+        assert block.token_ids == seq.block(i)
+        assert bm.hash_to_block_id[block.hash] == block.block_id
+    assert bm.blocks[seq.block_table[2]].hash == -1   # partial block: correctly left unregistered
+
+    # a fresh sequence with the same prefix now hits the rebuilt chain (2 shared blocks)
+    other = make_seq(12)
+    assert bm.can_allocate(other) == 2
+
+
 def test_can_swap_out_false_when_cpu_pool_too_small():
     bm = BlockManager(num_blocks=10, block_size=BLOCK, num_cpu_blocks=2)
     seq = make_seq(12)  # needs 3 CPU blocks, only 2 available

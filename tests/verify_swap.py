@@ -10,6 +10,7 @@ KV Cache CPU Offloading（swap-based preemption）验证脚本 —— 需要 GPU
   B1  KV 逐字节往返相等（最强、完全确定，与采样无关）
   B2  单序列 swap 往返逐 token 一致（注入 argmax + batch=1，确定性）
   B3  强制大量 swap 冒烟：不死锁、能跑完
+  B4  TP=2 端到端（需 ≥2 张 GPU）：swap 块映射经共享内存 RPC 广播到各 rank
   C   观测计数器 > 0（证明确实走了 swap 路径）
 
 每个 LLM 在独立子进程中运行：nano-vllm 的 exit() 不释放 KV 显存，同一进程内连开多个 LLM
@@ -60,12 +61,12 @@ def _b1_child(model_path, q):
         q.put(("err", traceback.format_exc()))
 
 
-def _gen_child(model_path, greedy, cap, cpu_offload_gb, prompts, max_tokens, q):
+def _gen_child(model_path, greedy, cap, cpu_offload_gb, prompts, max_tokens, tp, q):
     try:
         if greedy:
             _patch_argmax()
         from nanovllm import LLM, SamplingParams
-        kw = dict(enforce_eager=True, tensor_parallel_size=1)
+        kw = dict(enforce_eager=True, tensor_parallel_size=tp)
         if cap is not None:
             kw["num_kvcache_blocks"] = cap
         if cpu_offload_gb:
@@ -166,11 +167,29 @@ def case_b2(model_path):
 
 def case_b3(model_path):
     prompts = [LONG_PROMPT for _ in range(16)]
-    outs, so, si, rr = _run_isolated(_gen_child, model_path, False, 8, 4, prompts, 80)
+    outs, so, si, rr = _run_isolated(_gen_child, model_path, False, 8, 4, prompts, 80, 1)
     assert len(outs) == len(prompts)
     assert all(len(t) == 80 for t in outs), "存在未跑完的序列"
     print(f"[PASS] B3 冒烟不死锁 (swap_out {so} / swap_in {si} 块, recompute {rr} 次)")
     return so, si
+
+
+def case_b4(model_path):
+    """TP=2：swap 的块映射经共享内存 RPC 广播到各 rank，各 rank 迁移自己的 KV 分片。
+
+    验证多卡下同样的强制抢占负载仍能搬出/迁回且不死锁——TP=1 的 B3 覆盖不到这条 IPC 路径。
+    """
+    import torch
+    n_gpu = torch.cuda.device_count()
+    if n_gpu < 2:
+        print(f"[SKIP] B4 TP=2 需要至少 2 张 GPU（当前 {n_gpu} 张）")
+        return
+    prompts = [LONG_PROMPT for _ in range(16)]
+    outs, so, si, rr = _run_isolated(_gen_child, model_path, False, 8, 4, prompts, 80, 2)
+    assert len(outs) == len(prompts)
+    assert all(len(t) == 80 for t in outs), "存在未跑完的序列"
+    assert so > 0 and si > 0, f"TP=2 下未触发 swap（out={so}, in={si}）"
+    print(f"[PASS] B4 TP=2 端到端 (swap_out {so} / swap_in {si} 块, recompute {rr} 次)")
 
 
 def case_c(so, si):
@@ -194,6 +213,7 @@ def main():
     case_b2(model_path)
     so, si = case_b3(model_path)
     case_c(so, si)
+    case_b4(model_path)
     print("=" * 64)
     print("全部通过 ✅")
 

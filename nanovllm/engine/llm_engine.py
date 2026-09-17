@@ -35,6 +35,9 @@ class LLMEngine:
         atexit.register(self.exit)
 
     def exit(self):
+        if getattr(self, "_exited", False):    # idempotent: the atexit re-entry, or a second call, is a no-op
+            return
+        self._exited = True                    # set before teardown so it survives a raise partway through
         self.model_runner.call("exit")
         del self.model_runner
         for p in self.ps:
